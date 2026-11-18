@@ -1,0 +1,103 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '已存在的版本 Tag，例如 v0.1.0'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Verify and publish GitHub Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CI: true
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - name: Checkout release ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Validate tag name and ancestry
+        shell: bash
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag must match vMAJOR.MINOR.PATCH: $TAG" >&2
+            exit 1
+          fi
+          if ! git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag does not exist in this repository: $TAG" >&2
+            exit 1
+          fi
+          git fetch origin main --depth=1
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "Release tag must point to a commit reachable from main." >&2
+            exit 1
+          fi
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Type-check
+        run: pnpm typecheck
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Build and package
+        run: |
+          pnpm build
+          pnpm zip
+          pnpm verify:extension
+
+      - name: Validate version and CHANGELOG
+        run: node scripts/release-check.mjs "$TAG"
+
+      - name: Reject existing release
+        shell: bash
+        run: |
+          if gh release view "$TAG" --json tagName >/dev/null 2>&1; then
+            echo "Release $TAG already exists; refusing to overwrite." >&2
+            exit 1
+          fi
+
+      - name: Create GitHub Release
+        shell: bash
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          gh release create "$TAG" \
+            ".output/bookmark-home-${VERSION}-chrome.zip" \
+            --title "Bookmark Home ${TAG}" \
+            --notes-file .output/release-notes.md \
+            --verify-tag

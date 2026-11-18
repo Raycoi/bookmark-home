@@ -1,0 +1,108 @@
+<script setup lang="ts">
+import type { HealthScanState } from '../../types/websiteHealth';
+
+defineProps<{
+  scan: HealthScanState;
+  percent: number;
+  busy: boolean;
+}>();
+
+const emit = defineEmits<{
+  cancel: [];
+}>();
+</script>
+
+<template>
+  <section class="health-progress" aria-label="健康检查进度">
+    <div class="health-progress__head">
+      <span class="health-progress__label">
+        检测中 <strong>{{ scan.completed }}</strong> / {{ scan.total }}
+      </span>
+      <button
+        class="health-progress__cancel"
+        type="button"
+        :disabled="busy"
+        @click="emit('cancel')"
+      >
+        {{ busy ? '取消中…' : '取消未执行任务' }}
+      </button>
+    </div>
+    <div
+      class="health-progress__track"
+      role="progressbar"
+      aria-valuemin="0"
+      aria-valuemax="100"
+      :aria-valuenow="percent"
+      :aria-label="`健康检查进度 ${percent}%`"
+    >
+      <span class="health-progress__bar" :style="{ width: `${percent}%` }"></span>
+    </div>
+  </section>
+</template>
+
+<style scoped>
+.health-progress {
+  margin: 4px 0 14px;
+  padding: 11px 12px;
+  border: 1px solid var(--bh-health-info-soft);
+  border-radius: 11px;
+  background: var(--bh-health-info-soft);
+}
+
+.health-progress__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.health-progress__label {
+  color: var(--bh-color-text-soft);
+  font-size: 12px;
+}
+
+.health-progress__label strong {
+  color: var(--bh-health-info);
+  font-weight: 650;
+}
+
+.health-progress__cancel {
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 5px;
+  color: var(--bh-health-info);
+  background: transparent;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.health-progress__cancel:hover:not(:disabled) {
+  background: rgba(82, 119, 184, 0.1);
+}
+
+.health-progress__cancel:focus-visible {
+  outline: 2px solid var(--bh-color-accent);
+  outline-offset: 1px;
+}
+
+.health-progress__cancel:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.health-progress__track {
+  height: 5px;
+  margin-top: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(82, 119, 184, 0.13);
+}
+
+.health-progress__bar {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--bh-health-info);
+  transition: width var(--bh-duration-normal) var(--bh-ease-out);
+}
+</style>

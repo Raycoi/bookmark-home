@@ -1,0 +1,76 @@
+:root {
+  color-scheme: light;
+
+  --bh-font-sans:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', sans-serif;
+
+  /* 页面与节奏 */
+  --bh-page-width: 1120px;
+  --bh-page-gutter: clamp(20px, 4.5vw, 56px);
+  --bh-hero-top: clamp(96px, 24vh, 240px);
+  --bh-section-gap: clamp(38px, 4.5vw, 56px);
+  --bh-title-gap: 18px;
+
+  /* 网站入口统一规格 */
+  --bh-bookmark-column-min: 104px;
+  --bh-grid-gap-x: 8px;
+  --bh-grid-gap-y: 4px;
+  --bh-icon-tile-size: 42px;
+  --bh-bookmark-item-height: 92px;
+
+  /* 颜色 */
+  --bh-color-bg: #f6f5f2;
+  --bh-color-bg-top: #fbfaf8;
+  --bh-color-surface: #ffffff;
+  --bh-color-surface-hover: rgba(255, 255, 255, 0.82);
+  --bh-color-text: #24272d;
+  --bh-color-text-soft: #656b75;
+  --bh-color-text-faint: #8f949d;
+  --bh-color-border: rgba(35, 40, 50, 0.08);
+  --bh-color-border-strong: rgba(35, 40, 50, 0.14);
+  --bh-color-accent: #365fc7;
+  --bh-color-accent-soft: rgba(54, 95, 199, 0.09);
+  --bh-color-accent-border: rgba(54, 95, 199, 0.35);
+  --bh-color-danger: #b84242;
+  --bh-color-danger-soft: #fff4f2;
+  --bh-color-danger-border: rgba(184, 66, 66, 0.18);
+  --bh-color-warning: #7a5a20;
+  --bh-color-warning-soft: #fffaf0;
+  --bh-color-warning-border: rgba(151, 111, 42, 0.2);
+  --bh-health-ok: #4f876b;
+  --bh-health-ok-soft: #eef6f1;
+  --bh-health-info: #5277b8;
+  --bh-health-info-soft: #eef3fb;
+  --bh-health-warn: #9a7127;
+  --bh-health-warn-soft: #fbf4e5;
+  --bh-health-error: #b64a4a;
+  --bh-health-error-soft: #fbeeee;
+  --bh-health-neutral: #9a9da4;
+  --bh-health-neutral-soft: #f1f2f3;
+
+  /* 形状与阴影 */
+  --bh-radius-sm: 9px;
+  --bh-radius-md: 12px;
+  --bh-radius-lg: 18px;
+  --bh-shadow-search:
+    0 1px 2px rgba(30, 35, 45, 0.04),
+    0 24px 60px -36px rgba(30, 35, 45, 0.24);
+  --bh-shadow-search-focus:
+    0 0 0 4px rgba(54, 95, 199, 0.09),
+    0 2px 4px rgba(30, 35, 45, 0.04),
+    0 28px 64px -34px rgba(54, 95, 199, 0.2);
+  --bh-shadow-favicon: 0 1px 2px rgba(30, 35, 45, 0.06);
+
+  /* 动效 */
+  --bh-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --bh-duration-fast: 140ms;
+  --bh-duration-normal: 200ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --bh-duration-fast: 0ms;
+    --bh-duration-normal: 0ms;
+  }
+}

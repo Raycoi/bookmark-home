@@ -1,0 +1,41 @@
+# 依赖
+node_modules/
+.pnpm-store/
+.pnpm-cache/
+
+# 构建与 WXT 生成物
+.output/
+.wxt/
+stats.html
+
+# 测试与类型检查缓存
+coverage/
+.vitest/
+*.tsbuildinfo
+
+# 本地环境与编辑器
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# 日志
+*.log
+pnpm-debug.log*
+
+# E2E 运行状态
+.e2e-state.json
+.tmp/
+
+# 工具缓存
+.eslintcache
+
+# 测试生成的临时截图
+docs/*-final.png
+docs/phase-4-health-panel-before.png
+docs/phase-4-health-panel-complete.png
+docs/phase-4-health-cancel-progress.png

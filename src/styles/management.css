@@ -1,0 +1,189 @@
+.bh-form {
+  display: grid;
+  gap: 16px;
+}
+
+.bh-field {
+  display: grid;
+  gap: 6px;
+}
+
+.bh-label {
+  color: var(--bh-color-text-soft);
+  font-size: 12px;
+  font-weight: 620;
+  letter-spacing: 0.01em;
+}
+
+.bh-input,
+.bh-select {
+  width: 100%;
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--bh-color-border-strong);
+  border-radius: 10px;
+  outline: 0;
+  color: var(--bh-color-text);
+  background: var(--bh-color-surface);
+  font-size: 14px;
+  transition:
+    border-color var(--bh-duration-fast) ease,
+    box-shadow var(--bh-duration-fast) ease;
+}
+
+.bh-input::placeholder {
+  color: var(--bh-color-text-faint);
+}
+
+.bh-input:focus,
+.bh-select:focus {
+  border-color: var(--bh-color-accent-border);
+  box-shadow: 0 0 0 3px var(--bh-color-accent-soft);
+}
+
+.bh-hint {
+  margin: 0;
+  color: var(--bh-color-text-faint);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.bh-dialog-error {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--bh-color-danger-border);
+  border-radius: 10px;
+  color: var(--bh-color-danger);
+  background: var(--bh-color-danger-soft);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.bh-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.bh-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 620;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color var(--bh-duration-fast) ease,
+    border-color var(--bh-duration-fast) ease,
+    color var(--bh-duration-fast) ease;
+}
+
+.bh-button:focus-visible {
+  outline: 2px solid var(--bh-color-accent);
+  outline-offset: 2px;
+}
+
+.bh-button:disabled {
+  cursor: default;
+  opacity: 0.52;
+}
+
+.bh-button--primary {
+  color: #ffffff;
+  background: var(--bh-color-accent);
+}
+
+.bh-button--primary:hover:not(:disabled) {
+  background: #2d53b4;
+}
+
+.bh-button--secondary {
+  border-color: var(--bh-color-border-strong);
+  color: var(--bh-color-text-soft);
+  background: var(--bh-color-surface);
+}
+
+.bh-button--secondary:hover:not(:disabled) {
+  color: var(--bh-color-text);
+  background: #f7f7f5;
+}
+
+.bh-button--danger {
+  color: #ffffff;
+  background: var(--bh-color-danger);
+}
+
+.bh-button--danger:hover:not(:disabled) {
+  background: #a63737;
+}
+
+.bh-warning {
+  margin: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--bh-color-warning-border);
+  border-radius: 10px;
+  color: var(--bh-color-warning);
+  background: var(--bh-color-warning-soft);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.bh-copy {
+  margin: 0;
+  color: var(--bh-color-text-soft);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.add-button {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 20;
+  display: grid;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--bh-color-border-strong);
+  border-radius: 50%;
+  color: var(--bh-color-text-soft);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow:
+    0 1px 2px rgba(30, 35, 45, 0.05),
+    0 8px 24px -16px rgba(30, 35, 45, 0.42);
+  cursor: pointer;
+  transition:
+    color var(--bh-duration-fast) ease,
+    border-color var(--bh-duration-fast) ease,
+    background-color var(--bh-duration-fast) ease;
+}
+
+.add-button:hover {
+  border-color: var(--bh-color-accent-border);
+  color: var(--bh-color-accent);
+  background: var(--bh-color-surface);
+}
+
+.add-button:focus-visible {
+  outline: 2px solid var(--bh-color-accent);
+  outline-offset: 2px;
+}
+
+.add-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+@media (max-width: 560px) {
+  .add-button {
+    right: 16px;
+    bottom: 16px;
+  }
+}
