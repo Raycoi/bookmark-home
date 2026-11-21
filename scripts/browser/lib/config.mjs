@@ -1,9 +1,12 @@
+import { mkdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 export const ROOT = path.resolve(import.meta.dirname, '../../..');
-export const SHOT_DIR = path.join(ROOT, 'docs');
+export const SHOT_DIR = path.join(ROOT, '.tmp', 'browser-shots');
 export const STATE_FILE = path.join(ROOT, '.e2e-state.json');
+
+mkdirSync(SHOT_DIR, { recursive: true });
 
 export async function getExtensionId() {
   const fromEnvironment = process.env.E2E_EXTENSION_ID?.trim();

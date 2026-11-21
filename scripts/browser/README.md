@@ -60,7 +60,7 @@ node scripts/browser/health-auto-continue.mjs
 ```
 
 每个脚本会启动并关闭自己的本机 HTTP 测试服务（端口 `43123`），
-把截图写入 `docs/`，并以 JSON 输出检查结果；失败时退出码非 0。
+把截图写入 `.tmp/browser-shots/`，并以 JSON 输出检查结果；失败时退出码非 0。
 
 | 脚本 | 覆盖 |
 |---|---|
