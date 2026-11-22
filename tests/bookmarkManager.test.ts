@@ -250,6 +250,29 @@ describe('useBookmarkManager 删除与移动', () => {
     manager.dismissToast();
   });
 
+  it('删除后可通过 toast 撤销并重建书签', async () => {
+    const { manager, service, data } = setup();
+    const google = findBookmark(data, 'bm-google');
+
+    manager.askDeleteBookmark(google!);
+    await manager.confirmDelete();
+    expect(manager.toast.value?.actionLabel).toBe('撤销');
+
+    manager.runToastAction();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(service.createBookmark).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parentId: google!.parentId,
+        title: google!.title,
+        url: google!.url,
+        index: google!.index,
+      }),
+    );
+    expect(manager.toast.value?.message).toBe('已撤销删除');
+    manager.dismissToast();
+  });
+
   it('删除文件夹时显示后代数量，并调用 removeFolder', async () => {
     const { manager, service, data } = setup();
     const ai = data.bookmarksBar.folders.find((folder) => folder.id === 'folder-ai');
@@ -317,5 +340,179 @@ describe('useBookmarkManager 删除与移动', () => {
 
     expect(manager.dialogError.value).toBe('请选择其他文件夹作为目标位置');
     expect(manager.moveDialog.value).not.toBeNull();
+  });
+});
+
+describe('useBookmarkManager 文件夹编辑器', () => {
+  it('新增文件夹使用指定父级，保存后刷新并关闭', async () => {
+    const { manager, service, refresh } = setup();
+    manager.openAddFolder('folder-dev');
+
+    expect(manager.folderEditor.value).toEqual({
+      mode: 'create',
+      defaultParentId: 'folder-dev',
+    });
+
+    await manager.saveFolder({
+      title: '  New Folder  ',
+      parentId: 'folder-dev',
+    });
+
+    expect(service.createFolder).toHaveBeenCalledWith({
+      parentId: 'folder-dev',
+      title: 'New Folder',
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(manager.folderEditor.value).toBeNull();
+    expect(manager.toast.value?.message).toBe('已新建文件夹');
+    manager.dismissToast();
+  });
+
+  it('新增文件夹未指定父级时回退到书签栏', () => {
+    const { manager } = setup();
+    manager.openAddFolder();
+
+    expect(manager.folderEditor.value).toEqual({
+      mode: 'create',
+      defaultParentId: '1',
+    });
+  });
+
+  it('重命名文件夹只提交变更后的名称', async () => {
+    const { manager, service, data } = setup();
+    const ai = data.bookmarksBar.folders.find((folder) => folder.id === 'folder-ai');
+
+    manager.openRenameFolder(ai!);
+    expect(manager.folderEditor.value).toEqual({
+      mode: 'rename',
+      folder: ai,
+    });
+
+    await manager.saveFolder({ title: 'AI 工具 Pro', parentId: '1' });
+
+    expect(service.renameFolder).toHaveBeenCalledWith('folder-ai', 'AI 工具 Pro');
+    expect(manager.folderEditor.value).toBeNull();
+    expect(manager.toast.value?.message).toBe('已重命名文件夹');
+    manager.dismissToast();
+  });
+
+  it('重命名没有变化时不调用 renameFolder', async () => {
+    const { manager, service, data } = setup();
+    const ai = data.bookmarksBar.folders.find((folder) => folder.id === 'folder-ai');
+
+    manager.openRenameFolder(ai!);
+    await manager.saveFolder({ title: '  AI 工具  ', parentId: '1' });
+
+    expect(service.renameFolder).not.toHaveBeenCalled();
+    expect(manager.folderEditor.value).toBeNull();
+    expect(manager.toast.value?.message).toBe('没有需要保存的修改');
+    manager.dismissToast();
+  });
+
+  it('新增文件夹失败时保留编辑器与错误，并解除忙碌状态', async () => {
+    const { manager, service } = setup();
+    vi.mocked(service.createFolder).mockRejectedValueOnce(new Error('denied'));
+    manager.openAddFolder('folder-dev');
+
+    await manager.saveFolder({ title: 'Blocked', parentId: 'folder-dev' });
+
+    expect(manager.dialogError.value).toContain('denied');
+    expect(manager.folderEditor.value).not.toBeNull();
+    expect(manager.busy.value).toBe(false);
+    expect(manager.toast.value).toBeNull();
+  });
+
+  it('忙碌时不能打开或关闭编辑器', async () => {
+    const { manager, service } = setup();
+    manager.openAddBookmark();
+    manager.busy.value = true;
+
+    manager.openAddFolder();
+    expect(manager.folderEditor.value).toBeNull();
+
+    manager.closeBookmarkEditor();
+    expect(manager.bookmarkEditor.value).not.toBeNull();
+
+    await manager.saveBookmark({
+      title: 'Busy',
+      url: 'https://busy.example/',
+      parentId: '1',
+    });
+    expect(service.createBookmark).not.toHaveBeenCalled();
+
+    manager.busy.value = false;
+    manager.closeBookmarkEditor();
+    expect(manager.bookmarkEditor.value).toBeNull();
+  });
+});
+
+describe('useBookmarkManager 公开 API', () => {
+  it('保持 60 个公开键与现有调用方兼容', () => {
+    const { manager } = setup();
+    const expectedKeys = [
+      'homepage',
+      'busy',
+      'dialogError',
+      'bookmarkEditor',
+      'folderEditor',
+      'confirmDialog',
+      'moveDialog',
+      'contextMenu',
+      'toast',
+      'dragState',
+      'folderOptions',
+      'selectionMode',
+      'selectedIds',
+      'selectedCount',
+      'selectedBookmarks',
+      'enterSelection',
+      'exitSelection',
+      'toggleSelection',
+      'selectBookmarkIds',
+      'setSelectionOrder',
+      'askBulkDelete',
+      'openBulkMoveDialog',
+      'openBookmarkContextMenu',
+      'openBookmarkMenuAt',
+      'openFolderContextMenu',
+      'openFolderMenuAt',
+      'openAddMenu',
+      'handleContextAction',
+      'closeContextMenu',
+      'openAddBookmark',
+      'openEditBookmark',
+      'openAddFolder',
+      'openRenameFolder',
+      'closeBookmarkEditor',
+      'closeFolderEditor',
+      'closeConfirmDialog',
+      'closeMoveDialog',
+      'saveBookmark',
+      'saveFolder',
+      'confirmDelete',
+      'confirmMove',
+      'askDeleteBookmark',
+      'askDeleteFolder',
+      'openMoveDialog',
+      'startDrag',
+      'endDrag',
+      'dragOverBookmark',
+      'dragLeaveBookmark',
+      'dropOnBookmark',
+      'dragOverFolder',
+      'dragLeaveFolder',
+      'dropOnFolder',
+      'isBookmarkDropBefore',
+      'isBookmarkDropAfter',
+      'isFolderDropTarget',
+      'isDraggingNode',
+      'shouldSuppressClick',
+      'notify',
+      'dismissToast',
+      'runToastAction',
+    ];
+
+    expect(expectedKeys).toHaveLength(60);
+    expect(Object.keys(manager).sort()).toEqual([...expectedKeys].sort());
   });
 });

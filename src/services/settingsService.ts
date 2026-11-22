@@ -5,7 +5,7 @@ import {
 } from '../config/searchEngines';
 import { getErrorMessage } from '../utils/errors';
 
-const SEARCH_ENGINE_STORAGE_KEY = 'bookmarkHome.searchEngineId';
+export const SEARCH_ENGINE_STORAGE_KEY = 'bookmarkHome.searchEngineId';
 
 function hasSyncStorage(): boolean {
   return typeof chrome !== 'undefined' && Boolean(chrome.storage?.sync);

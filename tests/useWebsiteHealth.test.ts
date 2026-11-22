@@ -9,6 +9,8 @@ function makeSnapshot(id: string): HealthSnapshot {
     records: {},
     pendingUrls: [],
     checkingUrls: [],
+    retryUrls: [],
+    ignoredUrls: [],
     scan: {
       id,
       mode: 'all',
@@ -63,5 +65,68 @@ describe('useWebsiteHealth 快照请求', () => {
     await first;
     expect(health.scan.value?.id).toBe('newer');
     expect(health.loaded.value).toBe(true);
+  });
+
+  it('actionBusy 期间的刷新只排队一次，action 结束后补读快照', async () => {
+    const snapshotCallbacks: Array<
+      (response: HealthResponse | undefined) => void
+    > = [];
+    const actionCallbacks: Array<
+      (response: HealthResponse | undefined) => void
+    > = [];
+
+    vi.stubGlobal('chrome', {
+      runtime: {
+        lastError: undefined,
+        sendMessage: (
+          message: { type: string },
+          callback: (response: HealthResponse | undefined) => void,
+        ) => {
+          if (message.type === 'HEALTH_GET_SNAPSHOT') {
+            snapshotCallbacks.push(callback);
+          } else {
+            actionCallbacks.push(callback);
+          }
+        },
+      },
+      storage: {
+        onChanged: {
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        },
+      },
+    });
+
+    const health = useWebsiteHealth({ homepage: ref(null) });
+    const action = health.checkAll();
+    expect(health.actionBusy.value).toBe(true);
+
+    // action 期间多次触发刷新（storage 变更 / 可见性 / 手动），只保留一个待办。
+    await health.loadSnapshot();
+    await health.loadSnapshot();
+    expect(snapshotCallbacks).toHaveLength(0);
+
+    actionCallbacks[0]?.({
+      ok: true,
+      snapshot: makeSnapshot('after-action'),
+      notice: '已加入队列',
+    });
+    await action;
+
+    expect(health.actionBusy.value).toBe(false);
+    expect(snapshotCallbacks).toHaveLength(1);
+
+    snapshotCallbacks[0]?.({ ok: true, snapshot: makeSnapshot('after-refresh') });
+    await vi.waitFor(() => {
+      expect(health.scan.value?.id).toBe('after-refresh');
+    });
+    expect(health.loading.value).toBe(false);
+
+    // 排队标记已清理：再手动刷新才会发起新请求，不会重复补读。
+    expect(snapshotCallbacks).toHaveLength(1);
+    const manualRefresh = health.loadSnapshot();
+    expect(snapshotCallbacks).toHaveLength(2);
+    snapshotCallbacks[1]?.({ ok: true, snapshot: makeSnapshot('manual') });
+    await manualRefresh;
   });
 });

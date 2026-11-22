@@ -13,6 +13,7 @@ import {
   type NativeBookmarkNode,
   type PermanentFolderRole,
 } from '../types/bookmark';
+import { t } from '../i18n';
 
 const ROLE_BY_NODE_ID: Readonly<Record<string, PermanentFolderRole>> = PERMANENT_FOLDER_ROLES;
 const ROLE_BY_ROOT_ORDINAL: readonly PermanentFolderRole[] = [
@@ -21,11 +22,17 @@ const ROLE_BY_ROOT_ORDINAL: readonly PermanentFolderRole[] = [
   'mobile-bookmarks',
 ];
 
-const FALLBACK_SECTION_TITLES: Readonly<Record<PermanentFolderRole, string>> = {
-  'bookmarks-bar': '书签栏',
-  'other-bookmarks': '其他书签',
-  'mobile-bookmarks': '移动设备书签',
-};
+/** 原生书签树缺少永久目录标题时的回退文案（随语言切换）。 */
+function fallbackSectionTitle(role: PermanentFolderRole): string {
+  switch (role) {
+    case 'bookmarks-bar':
+      return t('bookmark.section.bookmarksBar');
+    case 'other-bookmarks':
+      return t('bookmark.section.otherBookmarks');
+    case 'mobile-bookmarks':
+      return t('bookmark.section.mobileBookmarks');
+  }
+}
 
 /** 书签树结构不符合 Chrome 约定时抛出的错误。 */
 export class BookmarkTreeError extends Error {
@@ -45,7 +52,7 @@ export class BookmarkTreeError extends Error {
  */
 export function transformBookmarkTree(tree: readonly NativeBookmarkNode[]): HomepageData {
   if (!Array.isArray(tree)) {
-    throw new BookmarkTreeError('书签树格式不正确');
+    throw new BookmarkTreeError(t('bookmark.error.treeInvalid'));
   }
 
   if (tree.length === 0) {
@@ -53,7 +60,7 @@ export function transformBookmarkTree(tree: readonly NativeBookmarkNode[]): Home
   }
 
   if (tree.length > 1) {
-    throw new BookmarkTreeError('书签树包含多个根节点，无法安全转换');
+    throw new BookmarkTreeError(t('bookmark.error.treeMultipleRoots'));
   }
 
   const root = tree[0];
@@ -62,7 +69,7 @@ export function transformBookmarkTree(tree: readonly NativeBookmarkNode[]): Home
   }
 
   if (typeof root.url === 'string') {
-    throw new BookmarkTreeError('书签树根节点不能是网址');
+    throw new BookmarkTreeError(t('bookmark.error.treeRootUrl'));
   }
 
   const rootChildren = sortNativeChildren(root.children);
@@ -76,7 +83,7 @@ export function transformBookmarkTree(tree: readonly NativeBookmarkNode[]): Home
 
   rootChildren.forEach((child, ordinal) => {
     if (typeof child.url === 'string') {
-      throw new BookmarkTreeError('书签树根节点下不能直接出现网址节点');
+      throw new BookmarkTreeError(t('bookmark.error.treeRootChildUrl'));
     }
 
     const role = resolveRootChildRole(child, ordinal, allowOrdinalFallback);
@@ -111,13 +118,18 @@ export function transformBookmarkTree(tree: readonly NativeBookmarkNode[]): Home
 
   const resolvedBar =
     bookmarksBar ??
-    createEmptySection('bookmarks-bar', BOOKMARKS_BAR_ID, FALLBACK_SECTION_TITLES['bookmarks-bar'], 0);
+    createEmptySection(
+      'bookmarks-bar',
+      BOOKMARKS_BAR_ID,
+      fallbackSectionTitle('bookmarks-bar'),
+      0,
+    );
   const resolvedOther =
     otherBookmarks ??
     createEmptySection(
       'other-bookmarks',
       OTHER_BOOKMARKS_ID,
-      FALLBACK_SECTION_TITLES['other-bookmarks'],
+      fallbackSectionTitle('other-bookmarks'),
       1,
     );
 
@@ -146,13 +158,13 @@ export function createEmptyHomepageData(): HomepageData {
   const bookmarksBar = createEmptySection(
     'bookmarks-bar',
     BOOKMARKS_BAR_ID,
-    FALLBACK_SECTION_TITLES['bookmarks-bar'],
+    fallbackSectionTitle('bookmarks-bar'),
     0,
   );
   const otherBookmarks = createEmptySection(
     'other-bookmarks',
     OTHER_BOOKMARKS_ID,
-    FALLBACK_SECTION_TITLES['other-bookmarks'],
+    fallbackSectionTitle('other-bookmarks'),
     1,
   );
 

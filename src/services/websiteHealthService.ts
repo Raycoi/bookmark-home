@@ -1,4 +1,5 @@
 import {
+  HEALTH_INITIAL_TIMEOUT_MS,
   HEALTH_MAX_RETRIES,
   HEALTH_RETRY_DELAY_MS,
   HEALTH_TIMEOUT_MS,
@@ -12,7 +13,11 @@ import {
   isRetryableHttpStatus,
   mapHttpStatus,
 } from '../utils/healthStatus';
-import { normalizeHealthUrl, isPrivateHealthUrl } from '../utils/healthUrl';
+import {
+  normalizeHealthUrl,
+  isPrivateHealthUrl,
+} from '../utils/healthUrl';
+import { t } from '../i18n';
 
 export type HealthFetch = (
   input: string,
@@ -22,6 +27,7 @@ export type HealthFetch = (
 export interface WebsiteHealthCheckOptions {
   fetchImpl?: HealthFetch;
   timeoutMs?: number;
+  initialTimeoutMs?: number;
   retryDelayMs?: number;
   maxRetries?: number;
   sleep?: (ms: number) => Promise<void>;
@@ -29,14 +35,14 @@ export interface WebsiteHealthCheckOptions {
 
 export class UnsupportedHealthUrlError extends Error {
   constructor() {
-    super('该地址不是可检测的 HTTP/HTTPS URL');
+    super(t('health.error.unsupportedAddress'));
     this.name = 'UnsupportedHealthUrlError';
   }
 }
 
 export class PrivateHealthUrlError extends Error {
   constructor() {
-    super('出于安全考虑，不检测内网/本机地址');
+    super(t('health.error.privateAddress'));
     this.name = 'PrivateHealthUrlError';
   }
 }
@@ -64,6 +70,8 @@ class HealthRequestError extends Error {
 
 interface RequestOutcome {
   httpStatus: number;
+  contentType: string;
+  contentLength: number | null;
   finalUrl?: string;
   redirected: boolean;
   responseTime: number;
@@ -93,18 +101,25 @@ export async function checkWebsiteHealth(
 
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   if (typeof fetchImpl !== 'function') {
-    throw new Error('当前环境不支持 fetch');
+    throw new Error(t('health.error.fetchUnavailable'));
   }
 
   const timeoutMs = options.timeoutMs ?? HEALTH_TIMEOUT_MS;
+  const initialTimeoutMs = Math.min(
+    timeoutMs,
+    options.initialTimeoutMs ?? HEALTH_INITIAL_TIMEOUT_MS,
+  );
   const retryDelayMs = options.retryDelayMs ?? HEALTH_RETRY_DELAY_MS;
-  const maxRetries = Math.max(0, options.maxRetries ?? HEALTH_MAX_RETRIES);
-  const sleep = options.sleep ?? defaultSleep;
+  const maxRetries = Math.max(0, options.maxRetries ?? HEALTH_MAX_RETRIES);  const sleep = options.sleep ?? defaultSleep;
   let lastError: HealthRequestError | null = null;
 
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     try {
-      const outcome = await requestAttempt(url, fetchImpl, timeoutMs);
+      const outcome = await requestAttempt(
+        url,
+        fetchImpl,
+        attempt === 0 ? initialTimeoutMs : timeoutMs,
+      );
 
       if (isRetryableHttpStatus(outcome.httpStatus) && attempt < maxRetries) {
         lastError = new HealthRequestError(
@@ -112,7 +127,7 @@ export async function checkWebsiteHealth(
           outcome.method,
           outcome.responseTime,
           defaultHealthErrorMessage('server_error', outcome.httpStatus) ??
-            '服务器异常',
+            t('health.status.server_error'),
         );
         await sleep(retryDelayMs);
         continue;
@@ -131,6 +146,18 @@ export async function checkWebsiteHealth(
         result.finalUrl = outcome.finalUrl;
       }
 
+      const audit = await auditHtmlPage(url, fetchImpl, outcome, timeoutMs);
+      if (audit === 'soft404') {
+        result.status = 'not_found';
+        result.errorMessage = t('health.error.soft404');
+        return result;
+      }
+      if (audit === 'login') {
+        result.status = 'restricted';
+        result.errorMessage = t('health.error.loginRequired');
+        return result;
+      }
+
       const errorMessage = defaultHealthErrorMessage(status, outcome.httpStatus);
       if (errorMessage !== undefined) {
         result.errorMessage = errorMessage;
@@ -145,7 +172,7 @@ export async function checkWebsiteHealth(
               'network',
               'HEAD',
               0,
-              '网络连接异常，无法确认网站状态',
+              t('health.error.network'),
             );
       lastError = requestError;
 
@@ -160,8 +187,8 @@ export async function checkWebsiteHealth(
   const method = lastError?.method ?? 'HEAD';
   const message =
     lastError?.kind === 'timeout'
-      ? `请求超时（${Math.round(timeoutMs / 1000)} 秒）`
-      : '网络连接异常，无法确认网站状态';
+      ? lastError.message
+      : t('health.error.network');
 
   return {
     status: 'unknown',
@@ -210,6 +237,8 @@ async function requestAttempt(
 
   const outcome: RequestOutcome = {
     httpStatus: response.status,
+    contentType: response.headers.get('content-type')?.toLowerCase() ?? '',
+    contentLength: parseContentLength(response.headers.get('content-length')),
     redirected,
     responseTime,
     method,
@@ -260,14 +289,14 @@ async function fetchWithTimeout(
         'timeout',
         method,
         elapsed,
-        `请求超时（${Math.round(timeoutMs / 1000)} 秒）`,
+        t('health.error.timeout', { seconds: Math.round(timeoutMs / 1000) }),
       );
     }
     throw new HealthRequestError(
       'network',
       method,
       elapsed,
-      '网络连接异常，无法确认网站状态',
+      t('health.error.network'),
     );
   } finally {
     clearTimeout(timer);
@@ -293,4 +322,78 @@ function isAbortError(error: unknown): boolean {
 
 function nowMs(): number {
   return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
+
+function parseContentLength(value: string | null): number | null {
+  if (!value) return null;
+  const length = Number(value);
+  return Number.isFinite(length) && length >= 0 ? length : null;
+}
+
+function shouldAuditHtml(outcome: RequestOutcome): boolean {
+  return (
+    outcome.httpStatus >= 200 &&
+    outcome.httpStatus < 300 &&
+    outcome.contentType.includes('text/html') &&
+    outcome.contentLength !== null &&
+    outcome.contentLength > 0 &&
+    outcome.contentLength <= 65_536
+  );
+}
+
+async function auditHtmlPage(
+  url: string,
+  fetchImpl: HealthFetch,
+  outcome: RequestOutcome,
+  timeoutMs: number,
+): Promise<'soft404' | 'login' | null> {
+  if (!shouldAuditHtml(outcome)) return null;
+  try {
+    const response = await fetchWithTimeout(url, 'GET', fetchImpl, timeoutMs, {
+      Range: 'bytes=0-65535',
+    });
+    const text = await readLimitedText(response.response, 65_536);
+    await discardResponseBody(response.response);
+    if (!text) return null;
+    const head = text.slice(0, 16_384);
+    const title = head.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? '';
+    const heading = head.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1] ?? '';
+    const signal = `${title} ${heading}`;
+    if (/(?:^|\D)404(?:\D|$)|not\s+found|page\s+not\s+found|页面不存在|找不到页面|页面未找到/i.test(signal)) {
+      return 'soft404';
+    }
+    if (
+      /<input[^>]+type\s*=\s*["']?password/i.test(head) ||
+      /(?:sign\s*in|log\s*in|登录|登入)/i.test(signal) && /<form\b/i.test(head)
+    ) {
+      return 'login';
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function readLimitedText(response: Response, maxBytes: number): Promise<string> {
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const chunks: string[] = [];
+  let total = 0;
+  try {
+    while (total < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      const remaining = maxBytes - total;
+      const part = value.byteLength > remaining ? value.subarray(0, remaining) : value;
+      chunks.push(decoder.decode(part, { stream: true }));
+      total += part.byteLength;
+      if (part.byteLength < value.byteLength) break;
+    }
+    chunks.push(decoder.decode());
+    return chunks.join('');
+  } finally {
+    reader.cancel().catch(() => {});
+  }
 }

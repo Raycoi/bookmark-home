@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, useId } from 'vue';
 import BaseDialog from './BaseDialog.vue';
+import { useI18n } from '../i18n';
 import type { FolderEditorState, FolderFormPayload } from '../types/management';
 import { formatFolderOption, type FlatFolderOption } from '../utils/folders';
-import { normalizeBookmarkTitle } from '../utils/url';
 import { getErrorMessage } from '../utils/errors';
 
 const props = defineProps<{
@@ -17,6 +17,8 @@ const emit = defineEmits<{
   save: [payload: FolderFormPayload];
   cancel: [];
 }>();
+
+const { t } = useI18n();
 
 const title = ref(
   props.state.mode === 'rename' ? props.state.folder.title : '',
@@ -40,9 +42,12 @@ function submit(): void {
   localError.value = null;
 
   try {
-    const normalizedTitle = normalizeBookmarkTitle(title.value, '文件夹名称');
+    const normalizedTitle = title.value.trim();
+    if (!normalizedTitle) {
+      throw new Error(t('folderEditor.nameRequired'));
+    }
     if (props.state.mode === 'create' && !parentId.value) {
-      throw new Error('请选择创建位置');
+      throw new Error(t('folderEditor.locationRequired'));
     }
 
     emit('save', {
@@ -57,14 +62,14 @@ function submit(): void {
 
 <template>
   <BaseDialog
-    :title="isRename ? '重命名文件夹' : '新建文件夹'"
-    :description="isRename ? '保留文件夹内的全部书签与子文件夹。' : '可直接创建在书签栏、其他书签或现有文件夹中。'"
+    :title="isRename ? t('folderEditor.titleRename') : t('folderEditor.titleCreate')"
+    :description="isRename ? t('folderEditor.descRename') : t('folderEditor.descCreate')"
     :busy="busy"
     @close="emit('cancel')"
   >
     <form :id="formId" class="bh-form" @submit.prevent="submit">
       <div class="bh-field">
-        <label class="bh-label" :for="`${formId}-title`">文件夹名称</label>
+        <label class="bh-label" :for="`${formId}-title`">{{ t('folderEditor.name') }}</label>
         <input
           :id="`${formId}-title`"
           v-model="title"
@@ -72,13 +77,13 @@ function submit(): void {
           type="text"
           autocomplete="off"
           data-autofocus
-          placeholder="例如：开发工具"
+          :placeholder="t('folderEditor.namePlaceholder')"
           :disabled="busy"
         />
       </div>
 
       <div v-if="!isRename" class="bh-field">
-        <label class="bh-label" :for="`${formId}-parent`">创建位置</label>
+        <label class="bh-label" :for="`${formId}-parent`">{{ t('folderEditor.location') }}</label>
         <select
           :id="`${formId}-parent`"
           v-model="parentId"
@@ -104,7 +109,7 @@ function submit(): void {
           :disabled="busy"
           @click="emit('cancel')"
         >
-          取消
+          {{ t('common.cancel') }}
         </button>
         <button
           class="bh-button bh-button--primary"
@@ -112,7 +117,13 @@ function submit(): void {
           :form="formId"
           :disabled="busy"
         >
-          {{ busy ? '保存中…' : isRename ? '保存名称' : '新建文件夹' }}
+          {{
+            busy
+              ? t('common.saving')
+              : isRename
+                ? t('folderEditor.saveName')
+                : t('folderEditor.titleCreate')
+          }}
         </button>
       </div>
     </template>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, useId } from 'vue';
+import { useI18n } from '../i18n';
 
 const props = withDefaults(
   defineProps<{
@@ -18,6 +19,8 @@ const props = withDefaults(
 const emit = defineEmits<{
   close: [];
 }>();
+
+const { t } = useI18n();
 
 const titleId = useId();
 const panelRef = ref<HTMLElement | null>(null);
@@ -131,7 +134,7 @@ onBeforeUnmount(() => {
           <button
             class="dialog-close"
             type="button"
-            aria-label="关闭"
+            :aria-label="t('common.close')"
             :disabled="busy"
             @click="requestClose"
           >

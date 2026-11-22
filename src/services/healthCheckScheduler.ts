@@ -1,7 +1,7 @@
 import {
   HEALTH_GLOBAL_CONCURRENCY,
-  HEALTH_MAX_TASKS_PER_PASS,
-  HEALTH_CONTINUATION_DELAY_MS,
+  HEALTH_PER_DOMAIN_CONCURRENCY,
+  HEALTH_RETRY_DELAY_MS,
   HEALTH_NEW_BOOKMARK_DELAY_MS,
   HEALTH_RECOVERY_LIMIT,
 } from '../config/healthPolicy';
@@ -25,15 +25,15 @@ import {
 import { createHealthRecord, isAbnormalHealthStatus } from '../utils/healthStatus';
 import { getHealthDomain, isPrivateHealthUrl, normalizeHealthUrl } from '../utils/healthUrl';
 import { getErrorMessage } from '../utils/errors';
+import { t } from '../i18n';
 
 export interface HealthCheckSchedulerDeps {
   cache: HealthCacheService;
-  checkUrl: (url: string) => Promise<WebsiteHealthCheckResult>;
+  checkUrl: (url: string, attempt: 1 | 2) => Promise<WebsiteHealthCheckResult>;
   getReferencedUrls: () => Promise<string[]>;
   now?: () => number;
-  maxTasksPerPass?: number;
   globalConcurrency?: number;
-  continuationDelayMs?: number;
+  perDomainConcurrency?: number;
 }
 
 export interface HealthCheckScheduler {
@@ -42,6 +42,8 @@ export interface HealthCheckScheduler {
   startScan(mode: HealthScanMode): Promise<StartScanResult>;
   cancelScan(): Promise<HealthSnapshot>;
   recheck(rawUrl: string): Promise<boolean>;
+  ignoreUrl(rawUrl: string): Promise<boolean>;
+  unignoreUrl(rawUrl: string): Promise<boolean>;
   queueBookmarkUrl(rawUrl: string, source?: HealthTaskSource): Promise<void>;
   queueBookmarkUrls(
     rawUrls: readonly string[],
@@ -65,21 +67,20 @@ export function createHealthCheckScheduler(
   const checkUrl = deps.checkUrl;
   const getReferencedUrls = deps.getReferencedUrls;
   const now = deps.now ?? Date.now;
-  const maxTasksPerPass = Math.max(1, deps.maxTasksPerPass ?? HEALTH_MAX_TASKS_PER_PASS);
   const globalConcurrency = Math.max(
     1,
     deps.globalConcurrency ?? HEALTH_GLOBAL_CONCURRENCY,
   );
-  const continuationDelayMs = Math.max(
-    0,
-    deps.continuationDelayMs ?? HEALTH_CONTINUATION_DELAY_MS,
+  const perDomainConcurrency = Math.max(
+    1,
+    deps.perDomainConcurrency ?? HEALTH_PER_DOMAIN_CONCURRENCY,
   );
 
   let initializePromise: Promise<void> | null = null;
   let passPromise: Promise<void> | null = null;
   let passRequested = false;
   let scanStartPromise: Promise<StartScanResult> | null = null;
-  let continuationTimer: ReturnType<typeof setTimeout> | null = null;
+  let nextPassTimer: ReturnType<typeof setTimeout> | null = null;
 
   function initialize(): Promise<void> {
     if (!initializePromise) {
@@ -107,7 +108,7 @@ export function createHealthCheckScheduler(
               responseTime: 0,
               method: 'HEAD',
               retryCount: 0,
-              errorMessage: '检测多次中断，暂时无法确认网站状态',
+              errorMessage: t('health.error.interrupted'),
             },
             now(),
           );
@@ -138,6 +139,9 @@ export function createHealthCheckScheduler(
 
     const queuedAt = now();
     await cache.update((state) => {
+      if (state.ignoredUrls.includes(url)) {
+        return;
+      }
       upsertHealthTask(state, url, source, queuedAt, {
         notBefore:
           source === 'bookmark_created'
@@ -160,6 +164,9 @@ export function createHealthCheckScheduler(
     const queuedAt = now();
     const state = await cache.read();
     const candidates = urls.filter((url) => {
+      if (state.ignoredUrls.includes(url)) {
+        return false;
+      }
       const record = state.records[url];
       return !record || record.nextCheckAt <= queuedAt;
     });
@@ -188,18 +195,64 @@ export function createHealthCheckScheduler(
 
     const checkedAt = now();
     await cache.update((state) => {
-      upsertHealthTask(state, url, 'manual', checkedAt, {
+      const task = upsertHealthTask(state, url, 'manual', checkedAt, {
         notBefore: checkedAt,
       });
+      if (task.status !== 'checking') {
+        task.status = 'pending';
+        task.attempt = 1;
+        task.notBefore = checkedAt;
+        task.recoveryCount = 0;
+        delete task.startedAt;
+      }
     });
     void requestPass();
     return true;
   }
 
+  async function ignoreUrl(rawUrl: string): Promise<boolean> {
+    await initialize();
+    const url = normalizeHealthUrl(rawUrl);
+    if (!url || isPrivateHealthUrl(url)) {
+      return false;
+    }
+
+    let ignored = false;
+    await cache.update((state) => {
+      if (state.scan?.status === 'running') {
+        return;
+      }
+      if (!state.ignoredUrls.includes(url)) {
+        state.ignoredUrls.push(url);
+      }
+      state.tasks = state.tasks.filter((task) => task.url !== url);
+      ignored = true;
+    });
+    return ignored;
+  }
+
+  async function unignoreUrl(rawUrl: string): Promise<boolean> {
+    await initialize();
+    const url = normalizeHealthUrl(rawUrl);
+    if (!url) {
+      return false;
+    }
+
+    let restored = false;
+    await cache.update((state) => {
+      const next = state.ignoredUrls.filter((item) => item !== url);
+      if (next.length !== state.ignoredUrls.length) {
+        state.ignoredUrls = next;
+        restored = true;
+      }
+    });
+    return restored;
+  }
+
   function requestPass(): Promise<void> {
-    if (continuationTimer) {
-      clearTimeout(continuationTimer);
-      continuationTimer = null;
+    if (nextPassTimer) {
+      clearTimeout(nextPassTimer);
+      nextPassTimer = null;
     }
 
     if (passPromise) {
@@ -225,126 +278,153 @@ export function createHealthCheckScheduler(
     await initialize();
     await refreshExpiredTasks();
 
-    const running = new Map<string, Promise<void>>();
-    const activeDomains = new Set<string>();
-    let started = 0;
-
-    while (started < maxTasksPerPass) {
-      if (running.size >= globalConcurrency) {
-        await Promise.race(running.values());
-        continue;
-      }
-
-      const task = await claimNextTask(
-        activeDomains,
-        new Set(running.keys()),
-        now(),
-      );
-
-      if (!task) {
-        if (running.size === 0) {
-          break;
-        }
-        await Promise.race(running.values());
-        continue;
-      }
-
-      const domain = getHealthDomain(task.url) ?? task.url;
-      started += 1;
-      activeDomains.add(domain);
-
-      const operation = executeTask(task).finally(() => {
-        running.delete(task.url);
-        activeDomains.delete(domain);
-      });
-      running.set(task.url, operation);
-    }
-
-    await Promise.all(running.values());
-    await scheduleContinuationIfNeeded();
-  }
-
-  async function scheduleContinuationIfNeeded(): Promise<void> {
-    if (passRequested || continuationTimer) {
-      return;
-    }
-
     const state = await cache.read();
-    if (
-      !state.tasks.some(
+    const tasks = interleaveByPriorityAndHost(
+      state.tasks.filter(
         (task) =>
           task.status === 'pending' &&
           task.notBefore <= now() &&
           !isPrivateHealthUrl(task.url),
-      )
-    ) {
-      return;
+      ),
+    );
+
+    if (tasks.length > 0) {
+      await runTaskPool(tasks);
     }
 
-    if (passRequested || continuationTimer) {
-      return;
-    }
-
-    continuationTimer = setTimeout(() => {
-      continuationTimer = null;
-      void requestPass();
-    }, continuationDelayMs);
+    await scheduleContinuationIfNeeded();
   }
 
-  async function claimNextTask(
-    activeDomains: ReadonlySet<string>,
-    activeUrls: ReadonlySet<string>,
-    claimedAt: number,
-  ): Promise<HealthCheckTask | null> {
-    let claimed: HealthCheckTask | null = null;
+  /**
+   * 动态 worker 池：每个 worker 完成一个任务后立刻从队列领取下一个，
+   * 不等待其他 worker，也不按批次等待。同域计数只限制本域，不占全局槽位。
+   */
+  async function runTaskPool(tasks: HealthCheckTask[]): Promise<void> {
+    const queue = [...tasks];
+    const activeHosts = new Map<string, number>();
+    let active = 0;
+
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = (): void => {
+        if (!settled && active === 0 && queue.length === 0) {
+          settled = true;
+          resolve();
+        }
+      };
+
+      const pump = (): void => {
+        if (settled) {
+          return;
+        }
+
+        while (active < globalConcurrency) {
+          const index = queue.findIndex((task) => {
+            const host = getHealthDomain(task.url) ?? task.url;
+            return (activeHosts.get(host) ?? 0) < perDomainConcurrency;
+          });
+          if (index < 0) {
+            break;
+          }
+
+          const task = queue[index];
+          if (!task) {
+            break;
+          }
+          queue.splice(index, 1);
+          const host = getHealthDomain(task.url) ?? task.url;
+          active += 1;
+          activeHosts.set(host, (activeHosts.get(host) ?? 0) + 1);
+
+          void claimTask(task.url)
+            .then((claimed) => (claimed ? executeTask(task) : undefined))
+            .catch((error) => {
+              console.warn(
+                '[Bookmark Home] 健康检查任务执行失败',
+                getErrorMessage(error),
+              );
+            })
+            .finally(() => {
+              active -= 1;
+              const remaining = (activeHosts.get(host) ?? 1) - 1;
+              if (remaining <= 0) {
+                activeHosts.delete(host);
+              } else {
+                activeHosts.set(host, remaining);
+              }
+              pump();
+              finish();
+            });
+        }
+
+        finish();
+      };
+
+      pump();
+    });
+  }
+
+  async function claimTask(url: string): Promise<boolean> {
+    let claimed = false;
+    const claimedAt = now();
 
     await cache.update((state) => {
-      const candidates = state.tasks
-        .filter((task) => {
-          if (task.status !== 'pending' || task.notBefore > claimedAt) {
-            return false;
-          }
-          if (isPrivateHealthUrl(task.url)) {
-            return false;
-          }
-          if (activeUrls.has(task.url)) {
-            return false;
-          }
-          const domain = getHealthDomain(task.url) ?? task.url;
-          return !activeDomains.has(domain);
-        })
-        .sort(
-          (left, right) =>
-            left.priority - right.priority ||
-            left.notBefore - right.notBefore ||
-            left.createdAt - right.createdAt,
-        );
-
-      const task = candidates[0];
-      if (!task) {
+      const task = state.tasks.find((item) => item.url === url);
+      if (!task || task.status !== 'pending' || task.notBefore > claimedAt) {
         return;
       }
-
       task.status = 'checking';
       task.startedAt = claimedAt;
-      claimed = { ...task };
+      task.attempt = task.attempt === 2 ? 2 : 1;
+      claimed = true;
     });
 
     return claimed;
   }
 
+  async function scheduleContinuationIfNeeded(): Promise<void> {
+    if (passRequested || nextPassTimer) {
+      return;
+    }
+
+    const state = await cache.read();
+    const pending = state.tasks.filter(
+      (task) =>
+        task.status === 'pending' &&
+        !isPrivateHealthUrl(task.url),
+    );
+
+    if (pending.length === 0) {
+      return;
+    }
+
+    if (pending.some((task) => task.notBefore <= now())) {
+      passRequested = true;
+      return;
+    }
+
+    const nextAt = Math.min(...pending.map((task) => task.notBefore));
+    nextPassTimer = setTimeout(() => {
+      nextPassTimer = null;
+      void requestPass();
+    }, Math.max(0, nextAt - now()));
+  }
+
   async function executeTask(task: HealthCheckTask): Promise<void> {
+    const attempt: 1 | 2 = task.attempt === 2 ? 2 : 1;
     let result: WebsiteHealthCheckResult;
 
     try {
-      result = await checkUrl(task.url);
+      result = await checkUrl(task.url, attempt);
     } catch (error) {
       result = {
         status: 'unknown',
         responseTime: 0,
         method: 'HEAD',
         retryCount: 0,
-        errorMessage: `无法确认网站状态：${getErrorMessage(error)}`,
+        errorMessage: t('health.error.unknownWithDetail', {
+          message: getErrorMessage(error),
+        }),
       };
     }
 
@@ -353,8 +433,19 @@ export function createHealthCheckScheduler(
       if (!existing) {
         return;
       }
+
       const record = createHealthRecord(task.url, result, now());
       saveHealthRecord(state, record);
+
+      if (attempt === 1 && isRetryableHealthResult(result)) {
+        existing.status = 'pending';
+        existing.attempt = 2;
+        existing.notBefore = now() + HEALTH_RETRY_DELAY_MS;
+        existing.recoveryCount = 0;
+        delete existing.startedAt;
+        return;
+      }
+
       state.tasks = state.tasks.filter((item) => item.url !== task.url);
 
       if (state.scan?.status === 'running' && existing.batchId === state.scan.id) {
@@ -380,6 +471,9 @@ export function createHealthCheckScheduler(
     await cache.update((nextState) => {
       for (const record of expired) {
         if (!referenced.has(record.url)) {
+          continue;
+        }
+        if (nextState.ignoredUrls.includes(record.url)) {
           continue;
         }
         if (findHealthTask(nextState, record.url)) {
@@ -409,18 +503,20 @@ export function createHealthCheckScheduler(
       return {
         started: false,
         total: snapshot.scan.total,
-        notice: '已有检测任务正在进行',
+        notice: t('health.notice.scanRunning'),
       };
     }
 
     const referenced = sanitizeReferencedUrls(await getReferencedUrls());
+    const ignored = new Set(snapshot.ignoredUrls);
+    const activeReferenced = referenced.filter((url) => !ignored.has(url));
     const urls =
       mode === 'abnormal'
-        ? referenced.filter((url) => {
+        ? activeReferenced.filter((url) => {
             const record = snapshot.records[url];
             return record ? isAbnormalHealthStatus(record.status) : false;
           })
-        : referenced;
+        : activeReferenced;
 
     if (urls.length === 0) {
       return {
@@ -428,8 +524,8 @@ export function createHealthCheckScheduler(
         total: 0,
         notice:
           mode === 'abnormal'
-            ? '当前没有可重新检测的异常网站'
-            : '没有可检测的 HTTP/HTTPS 书签',
+            ? t('health.notice.noAbnormalUrls')
+            : t('health.notice.noCheckableUrls'),
       };
     }
 
@@ -458,10 +554,17 @@ export function createHealthCheckScheduler(
       };
 
       for (const url of urls) {
-        upsertHealthTask(state, url, 'manual', startedAt, {
+        const task = upsertHealthTask(state, url, 'manual', startedAt, {
           notBefore: startedAt,
           batchId: scanId,
         });
+        if (task.status !== 'checking') {
+          task.status = 'pending';
+          task.attempt = 1;
+          task.notBefore = startedAt;
+          task.recoveryCount = 0;
+          delete task.startedAt;
+        }
       }
 
       started = true;
@@ -472,7 +575,7 @@ export function createHealthCheckScheduler(
       return {
         started: false,
         total: latest.scan?.total ?? 0,
-        notice: '已有检测任务正在进行',
+        notice: t('health.notice.scanRunning'),
       };
     }
 
@@ -522,6 +625,8 @@ export function createHealthCheckScheduler(
     startScan,
     cancelScan,
     recheck,
+    ignoreUrl,
+    unignoreUrl,
     queueBookmarkUrl,
     queueBookmarkUrls,
     cleanupOrphans,
@@ -547,7 +652,58 @@ function sanitizeReferencedUrls(urls: readonly string[]): string[] {
   return result;
 }
 
-/** 在任务完成/恢复时推进其所属扫描进度。 */
+/** 只有无法确认的状态进入第二阶段；4xx/403/429 不复查。 */
+function isRetryableHealthResult(result: WebsiteHealthCheckResult): boolean {
+  return result.status === 'unknown' || result.status === 'server_error';
+}
+
+/**
+ * 先按优先级分组，再在组内按 hostname 交错，避免同域任务扎堆，
+ * 同时不破坏 manual 高于 scheduled/bookmark_created 的调度语义。
+ */
+function interleaveByPriorityAndHost(
+  tasks: readonly HealthCheckTask[],
+): HealthCheckTask[] {
+  const byPriority = new Map<number, HealthCheckTask[]>();
+  for (const task of tasks) {
+    const group = byPriority.get(task.priority);
+    if (group) {
+      group.push(task);
+    } else {
+      byPriority.set(task.priority, [task]);
+    }
+  }
+
+  const result: HealthCheckTask[] = [];
+  for (const priority of [...byPriority.keys()].sort((a, b) => a - b)) {
+    const group = byPriority.get(priority) ?? [];
+    const buckets = new Map<string, HealthCheckTask[]>();
+    for (const task of group) {
+      const host = getHealthDomain(task.url) ?? task.url;
+      const bucket = buckets.get(host);
+      if (bucket) {
+        bucket.push(task);
+      } else {
+        buckets.set(host, [task]);
+      }
+    }
+
+    const queues = [...buckets.values()].sort((a, b) => b.length - a.length);
+    const maxLength = queues[0]?.length ?? 0;
+    for (let round = 0; round < maxLength; round += 1) {
+      for (const queue of queues) {
+        const task = queue[round];
+        if (task) {
+          result.push(task);
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
+
 function bumpScanProgress(
   state: {
     scan: import('../types/websiteHealth').HealthScanState | null;

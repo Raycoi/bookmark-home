@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useI18n } from '../i18n';
 import type { ToastState } from '../types/management';
 
 defineProps<{
@@ -7,7 +8,10 @@ defineProps<{
 
 defineEmits<{
   close: [];
+  action: [];
 }>();
+
+const { t } = useI18n();
 </script>
 
 <template>
@@ -45,7 +49,20 @@ defineEmits<{
         </svg>
       </span>
       <span class="operation-toast__message">{{ toast.message }}</span>
-      <button class="operation-toast__close" type="button" aria-label="关闭提示" @click="$emit('close')">
+      <button
+        v-if="toast.actionLabel"
+        class="operation-toast__action"
+        type="button"
+        @click="$emit('action')"
+      >
+        {{ toast.actionLabel }}
+      </button>
+      <button
+        class="operation-toast__close"
+        type="button"
+        :aria-label="t('toast.close')"
+        @click="$emit('close')"
+      >
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <path
             d="m4 4 8 8m0-8-8 8"
@@ -63,7 +80,7 @@ defineEmits<{
 .operation-toast {
   position: fixed;
   left: 50%;
-  bottom: 28px;
+  bottom: 88px;
   z-index: 80;
   display: flex;
   align-items: center;
@@ -102,6 +119,27 @@ defineEmits<{
   text-align: left;
 }
 
+.operation-toast__action {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--bh-color-accent);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.operation-toast__action:hover {
+  background: var(--bh-color-accent-soft);
+}
+
+.operation-toast__action:focus-visible {
+  outline: 2px solid var(--bh-color-accent);
+  outline-offset: 1px;
+}
+
 .operation-toast__close {
   display: grid;
   flex: 0 0 auto;
@@ -134,7 +172,7 @@ defineEmits<{
 
 @media (max-width: 560px) {
   .operation-toast {
-    bottom: 68px;
+    bottom: 76px;
   }
 }
 </style>

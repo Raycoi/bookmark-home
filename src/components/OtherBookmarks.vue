@@ -2,11 +2,14 @@
 import { ref } from 'vue';
 import BookmarkFolder from './BookmarkFolder.vue';
 import { useFolderInteractions } from '../composables/useFolderInteractions';
+import { useI18n } from '../i18n';
 import type { HomepageSection } from '../types/bookmark';
 
 const props = defineProps<{
   section: HomepageSection;
 }>();
+
+const { t } = useI18n();
 
 const moreButton = ref<HTMLButtonElement | null>(null);
 const {
@@ -31,7 +34,7 @@ const {
       @dragleave="onDragLeave"
       @drop.stop="onDrop"
     >
-      <h2 class="other-bookmarks__title">其他书签</h2>
+      <h2 class="other-bookmarks__title">{{ t('otherBookmarks.title') }}</h2>
       <svg
         class="other-bookmarks__chevron"
         width="14"
@@ -53,8 +56,8 @@ const {
         ref="moreButton"
         class="other-bookmarks__more"
         type="button"
-        aria-label="管理其他书签"
-        title="管理其他书签"
+        :aria-label="t('otherBookmarks.manage')"
+        :title="t('otherBookmarks.manage')"
         :disabled="isBusy"
         @click.prevent.stop="openMenu"
         @contextmenu.prevent.stop="openMenu"

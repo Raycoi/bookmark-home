@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import Favicon from './Favicon.vue';
-import HealthStatusIndicator from './health/HealthStatusIndicator.vue';
 import { useBookmarkManagerContext } from '../composables/useBookmarkManager';
+import { useI18n } from '../i18n';
+import { recordRecentBookmark } from '../services/recentBookmarksService';
 import type { HomepageBookmark } from '../types/bookmark';
 import { getNavigableUrl } from '../utils/navigation';
 
@@ -20,11 +21,16 @@ const props = withDefaults(
 
 const manager = useBookmarkManagerContext();
 const moreButton = ref<HTMLButtonElement | null>(null);
+const { t } = useI18n();
 
-const title = computed(() => props.bookmark.title.trim() || '未命名书签');
+const title = computed(() => props.bookmark.title.trim() || t('common.unnamedBookmark'));
 const safeUrl = computed(() => getNavigableUrl(props.bookmark.url));
 const faviconSize = computed(() => (props.variant === 'horizontal' ? 32 : 42));
 const isBusy = computed(() => manager?.busy.value ?? false);
+const isSelectionMode = computed(() => manager?.selectionMode.value ?? false);
+const isSelected = computed(
+  () => manager?.selectedIds.value.has(props.bookmark.id) ?? false,
+);
 const isDragging = computed(
   () => manager?.isDraggingNode(props.bookmark.id) ?? false,
 );
@@ -35,7 +41,9 @@ const dropAfter = computed(
   () => manager?.isBookmarkDropAfter(props.bookmark.id) ?? false,
 );
 const tooltip = computed(() =>
-  safeUrl.value ? `${title.value}\n${safeUrl.value}` : `网址格式无效：${props.bookmark.url}`,
+  safeUrl.value
+    ? `${title.value}\n${safeUrl.value}`
+    : t('bookmarkItem.invalidUrl', { url: props.bookmark.url }),
 );
 
 function onContextMenu(event: MouseEvent): void {
@@ -74,7 +82,21 @@ function onDrop(event: DragEvent): void {
 }
 
 function onClick(event: MouseEvent): void {
-  manager?.shouldSuppressClick(event);
+  if (manager?.shouldSuppressClick(event)) {
+    return;
+  }
+  if (isSelectionMode.value) {
+    event.preventDefault();
+    event.stopPropagation();
+    manager?.toggleSelection(props.bookmark.id, event.shiftKey);
+    return;
+  }
+  void recordRecentBookmark({
+    id: props.bookmark.id,
+    title: props.bookmark.title,
+    url: props.bookmark.url,
+    folderPath: '',
+  });
 }
 </script>
 
@@ -87,10 +109,12 @@ function onClick(event: MouseEvent): void {
         'is-dragging': isDragging,
         'is-drop-before': dropBefore,
         'is-drop-after': dropAfter,
+        'is-selected': isSelected,
+        'is-selection-mode': isSelectionMode,
       },
     ]"
     :data-bookmark-id="bookmark.id"
-    :draggable="Boolean(manager) && !isBusy"
+    :draggable="Boolean(manager) && !isBusy && !isSelectionMode"
     @contextmenu="onContextMenu"
     @dragstart="onDragStart"
     @dragend="onDragEnd"
@@ -105,8 +129,20 @@ function onClick(event: MouseEvent): void {
       :href="safeUrl"
       :title="tooltip"
       draggable="false"
+      :aria-pressed="isSelectionMode ? isSelected : undefined"
       @click="onClick"
     >
+      <span v-if="isSelectionMode" class="selection-check" aria-hidden="true">
+        <svg v-if="isSelected" width="12" height="12" viewBox="0 0 16 16" fill="none">
+          <path
+            d="m3.5 8.2 3 3 6-6.4"
+            stroke="currentColor"
+            stroke-width="1.9"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </span>
       <Favicon :url="bookmark.url" :size="faviconSize" :eager="eager" />
       <span class="bookmark-name">{{ title }}</span>
     </a>
@@ -122,15 +158,13 @@ function onClick(event: MouseEvent): void {
       <span class="bookmark-name">{{ title }}</span>
     </span>
 
-    <HealthStatusIndicator :raw-url="bookmark.url" :variant="variant" />
-
     <button
-      v-if="manager"
+      v-if="manager && !isSelectionMode"
       ref="moreButton"
       class="bookmark-more"
       type="button"
-      :aria-label="`管理${title}`"
-      :title="`管理${title}`"
+      :aria-label="t('bookmarkItem.manage', { name: title })"
+      :title="t('bookmarkItem.manage', { name: title })"
       :disabled="isBusy"
       draggable="false"
       @click.stop="openMenu"
@@ -163,6 +197,42 @@ function onClick(event: MouseEvent): void {
 
 .bookmark-entry.is-dragging {
   opacity: 0.38;
+}
+
+.bookmark-entry.is-selection-mode .bookmark-item {
+  cursor: pointer;
+}
+
+.bookmark-entry.is-selected .bookmark-item {
+  background: var(--bh-color-accent-soft);
+  box-shadow: inset 0 0 0 1px var(--bh-color-accent-border);
+}
+
+.selection-check {
+  display: grid;
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  place-items: center;
+  border: 1px solid var(--bh-color-border-strong);
+  border-radius: 5px;
+  color: #fff;
+  background: var(--bh-color-surface);
+}
+
+.bookmark-item--vertical .selection-check {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+}
+
+.bookmark-item--horizontal .selection-check {
+  margin-right: 1px;
+}
+
+.is-selected .selection-check {
+  border-color: var(--bh-color-accent);
+  background: var(--bh-color-accent);
 }
 
 .bookmark-entry.is-drop-before::before,

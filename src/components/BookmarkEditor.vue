@@ -1,14 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, useId } from 'vue';
 import BaseDialog from './BaseDialog.vue';
+import { useI18n } from '../i18n';
 import type { BookmarkEditorState, BookmarkFormPayload } from '../types/management';
 import {
   formatFolderOption,
   type FlatFolderOption,
 } from '../utils/folders';
-import {
-  normalizeBookmarkTitle,
-} from '../utils/url';
 import { getErrorMessage } from '../utils/errors';
 
 const props = defineProps<{
@@ -22,6 +20,8 @@ const emit = defineEmits<{
   save: [payload: BookmarkFormPayload];
   cancel: [];
 }>();
+
+const { t } = useI18n();
 
 const title = ref(
   props.state.mode === 'edit' ? props.state.bookmark.title : '',
@@ -48,15 +48,19 @@ function submit(): void {
   localError.value = null;
 
   try {
-    const normalizedTitle = normalizeBookmarkTitle(title.value, '书签名称');
+    const normalizedTitle = title.value.trim();
+    if (!normalizedTitle) {
+      throw new Error(t('bookmarkEditor.nameRequired'));
+    }
+
     const trimmedUrl = url.value.trim();
 
     if (!trimmedUrl) {
-      throw new Error('网址不能为空');
+      throw new Error(t('bookmarkEditor.urlRequired'));
     }
 
     if (props.state.mode === 'create' && !parentId.value) {
-      throw new Error('请选择保存位置');
+      throw new Error(t('bookmarkEditor.locationRequired'));
     }
 
     emit('save', {
@@ -72,14 +76,14 @@ function submit(): void {
 
 <template>
   <BaseDialog
-    :title="isEdit ? '编辑书签' : '新增书签'"
-    :description="isEdit ? '只保存发生变化的字段，直接写入 Chrome 原生书签。' : '保存后会直接出现在 Chrome 原生书签中。'"
+    :title="isEdit ? t('bookmarkEditor.titleEdit') : t('bookmarkEditor.titleCreate')"
+    :description="isEdit ? t('bookmarkEditor.descEdit') : t('bookmarkEditor.descCreate')"
     :busy="busy"
     @close="emit('cancel')"
   >
     <form :id="formId" class="bh-form" @submit.prevent="submit">
       <div class="bh-field">
-        <label class="bh-label" :for="`${formId}-title`">网站名称</label>
+        <label class="bh-label" :for="`${formId}-title`">{{ t('bookmarkEditor.name') }}</label>
         <input
           :id="`${formId}-title`"
           v-model="title"
@@ -87,13 +91,13 @@ function submit(): void {
           type="text"
           autocomplete="off"
           data-autofocus
-          placeholder="例如：GitHub"
+          :placeholder="t('bookmarkEditor.namePlaceholder')"
           :disabled="busy"
         />
       </div>
 
       <div class="bh-field">
-        <label class="bh-label" :for="`${formId}-url`">网站 URL</label>
+        <label class="bh-label" :for="`${formId}-url`">{{ t('bookmarkEditor.url') }}</label>
         <input
           :id="`${formId}-url`"
           v-model="url"
@@ -106,11 +110,11 @@ function submit(): void {
           placeholder="https://example.com"
           :disabled="busy"
         />
-        <p class="bh-hint">省略协议时会自动补全 https://。</p>
+        <p class="bh-hint">{{ t('bookmarkEditor.urlHint') }}</p>
       </div>
 
       <div v-if="!isEdit" class="bh-field">
-        <label class="bh-label" :for="`${formId}-parent`">保存位置</label>
+        <label class="bh-label" :for="`${formId}-parent`">{{ t('bookmarkEditor.location') }}</label>
         <select
           :id="`${formId}-parent`"
           v-model="parentId"
@@ -136,7 +140,7 @@ function submit(): void {
           :disabled="busy"
           @click="emit('cancel')"
         >
-          取消
+          {{ t('common.cancel') }}
         </button>
         <button
           class="bh-button bh-button--primary"
@@ -144,7 +148,13 @@ function submit(): void {
           :form="formId"
           :disabled="busy"
         >
-          {{ busy ? '保存中…' : isEdit ? '保存修改' : '新增书签' }}
+          {{
+            busy
+              ? t('common.saving')
+              : isEdit
+                ? t('bookmarkEditor.saveChanges')
+                : t('bookmarkEditor.titleCreate')
+          }}
         </button>
       </div>
     </template>

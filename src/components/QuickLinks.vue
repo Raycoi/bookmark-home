@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import BookmarkItem from './BookmarkItem.vue';
+import { useI18n } from '../i18n';
 import type { HomepageBookmark } from '../types/bookmark';
 
 defineProps<{
   bookmarks: HomepageBookmark[];
 }>();
+
+const { t } = useI18n();
 </script>
 
 <template>
   <section class="quick-links" aria-labelledby="quick-links-title">
-    <h2 id="quick-links-title" class="visually-hidden">常用网站</h2>
+    <h2 id="quick-links-title" class="visually-hidden">{{ t('quickLinks.title') }}</h2>
     <div class="quick-links__grid">
       <div
         v-for="bookmark in bookmarks"

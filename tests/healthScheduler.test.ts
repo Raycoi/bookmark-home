@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   HEALTH_CACHE_RETENTION_MS,
   HEALTH_NEW_BOOKMARK_DELAY_MS,
+  HEALTH_RETRY_DELAY_MS,
   HEALTH_RECOVERY_LIMIT,
+  HEALTH_SCHEMA_VERSION,
   HEALTH_TASK_PRIORITY,
 } from '../src/config/healthPolicy';
 import { createHealthCacheService, saveHealthRecord, upsertHealthTask, type HealthStorageArea } from '../src/services/healthCacheService';
@@ -11,12 +13,14 @@ import type { WebsiteHealthCheckResult } from '../src/types/websiteHealth';
 
 class MemoryStorage implements HealthStorageArea {
   data: Record<string, unknown> = {};
+  writes = 0;
 
   async get(key: string): Promise<Record<string, unknown>> {
     return { [key]: this.data[key] };
   }
 
   async set(items: Record<string, unknown>): Promise<void> {
+    this.writes += 1;
     Object.assign(this.data, items);
   }
 }
@@ -49,7 +53,8 @@ function setup(options: {
   urls?: string[];
   check?: (url: string) => Promise<WebsiteHealthCheckResult>;
   now?: () => number;
-  continuationDelayMs?: number;
+  globalConcurrency?: number;
+  perDomainConcurrency?: number;
 } = {}) {
   const storage = new MemoryStorage();
   let currentNow = 1_000;
@@ -62,9 +67,8 @@ function setup(options: {
     checkUrl: check,
     getReferencedUrls: async () => urls,
     now,
-    maxTasksPerPass: 10,
-    globalConcurrency: 3,
-    continuationDelayMs: options.continuationDelayMs ?? 1,
+    globalConcurrency: options.globalConcurrency ?? 3,
+    perDomainConcurrency: options.perDomainConcurrency ?? 2,
   });
   return {
     storage,
@@ -92,14 +96,11 @@ async function queueAll(
 }
 
 describe('健康检查调度器并发与队列', () => {
-  it('全局并发不超过 3，同域并发不超过 1', async () => {
+  it('全局并发不超过 3，同域并发不超过 2', async () => {
     const urls = [
       'https://a.example/1',
       'https://a.example/2',
-      'https://b.example/1',
-      'https://b.example/2',
-      'https://c.example/1',
-      'https://c.example/2',
+      'https://a.example/3',
     ];
     let active = 0;
     let maxActive = 0;
@@ -126,20 +127,20 @@ describe('健康检查调度器并发与队列', () => {
     await context.scheduler.requestPass();
 
     expect(maxActive).toBeLessThanOrEqual(3);
-    expect(maxDomain).toBe(1);
-    expect(context.check).toHaveBeenCalledTimes(6);
+    expect(maxDomain).toBe(2);
+    expect(context.check).toHaveBeenCalledTimes(3);
     const state = await context.cache.read();
     expect(Object.keys(state.records).sort()).toEqual(urls.sort());
   });
 
   it.each([0, 1, 10, 11, 20, 21])(
-    '每轮最多 10 个任务，并在 %i 个任务时自动续跑',
+    '动态 worker 池一次处理 %i 个任务',
     async (count) => {
       const urls = Array.from(
         { length: count },
         (_, index) => `https://continuation-${index}.example/`,
       );
-      const context = setup({ urls, continuationDelayMs: 1 });
+      const context = setup({ urls });
 
       const start = await context.scheduler.startScan('all');
       if (count === 0) {
@@ -151,9 +152,8 @@ describe('健康检查调度器并发与队列', () => {
 
       expect(start).toMatchObject({ started: true, total: count });
       await context.scheduler.requestPass();
-      expect(context.check).toHaveBeenCalledTimes(Math.min(count, 10));
+      expect(context.check).toHaveBeenCalledTimes(count);
 
-      await waitFor(() => context.check.mock.calls.length === count);
       await waitFor(async () => {
         const state = await context.cache.read();
         return state.scan?.status === 'completed' && state.tasks.length === 0;
@@ -212,7 +212,7 @@ describe('健康检查调度器并发与队列', () => {
     expect(start).toMatchObject({ started: true, total: 1 });
     await context.scheduler.requestPass();
     expect(context.check).toHaveBeenCalledTimes(1);
-    expect(context.check).toHaveBeenCalledWith('https://public.example/');
+    expect(context.check).toHaveBeenCalledWith('https://public.example/', 1);
   });
 });
 
@@ -384,7 +384,7 @@ describe('健康检查过期、恢复与清理', () => {
 
     await context.scheduler.requestPass();
 
-    expect(context.check).toHaveBeenCalledWith(url);
+    expect(context.check).toHaveBeenCalledWith(url, 1);
     const state = await context.cache.read();
     expect(state.records[url]?.checkedAt).toBe(1_000);
   });
@@ -420,7 +420,7 @@ describe('健康检查过期、恢复与清理', () => {
     const final = await context.cache.getSnapshot();
     expect(final.scan?.status).toBe('completed');
     expect(final.scan?.completed).toBe(1);
-    expect(context.check).toHaveBeenCalledWith(url);
+    expect(context.check).toHaveBeenCalledWith(url, 1);
   });
 
   it('初始化失败后下一次事件可以重新恢复', async () => {
@@ -500,5 +500,175 @@ describe('健康检查过期、恢复与清理', () => {
     const state = await context.cache.read();
     expect(state.tasks).toHaveLength(0);
     expect(state.records['https://gone.example/']).toBeUndefined();
+  });
+});
+
+describe('健康检查两阶段复查', () => {
+  it('首次无法确认时进入第二阶段，且不提前完成扫描', async () => {
+    const url = 'https://retry.example/';
+    let calls = 0;
+    const context = setup({
+      urls: [url],
+      check: async () => {
+        calls += 1;
+        return calls === 1
+          ? {
+              status: 'unknown',
+              responseTime: 3_000,
+              method: 'HEAD',
+              retryCount: 0,
+              errorMessage: '请求超时',
+            }
+          : healthyResult();
+      },
+    });
+
+    await context.scheduler.startScan('all');
+    await context.scheduler.requestPass();
+
+    let state = await context.cache.read();
+    expect(calls).toBe(1);
+    expect(state.tasks[0]?.attempt).toBe(2);
+    expect(state.scan?.status).toBe('running');
+
+    context.now += HEALTH_RETRY_DELAY_MS + 1;
+    await context.scheduler.requestPass();
+
+    state = await context.cache.read();
+    expect(calls).toBe(2);
+    expect(state.records[url]?.status).toBe('healthy');
+    expect(state.scan).toMatchObject({ status: 'completed', completed: 1 });
+  });
+});
+describe('健康检查动态并发基准（可控 mock）', () => {
+  it('9 个不同域名使用完整并发池', async () => {
+    const urls = Array.from({ length: 9 }, (_, i) => `https://nine-${i}.example/`);
+    let active = 0;
+    let maxActive = 0;
+    const context = setup({
+      urls,
+      globalConcurrency: 6,
+      check: async () => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await sleep(25);
+        active -= 1;
+        return healthyResult();
+      },
+    });
+
+    await context.scheduler.startScan('all');
+    const startedAt = Date.now();
+    await context.scheduler.requestPass();
+    const elapsed = Date.now() - startedAt;
+
+    expect(maxActive).toBe(6);
+    expect(context.check).toHaveBeenCalledTimes(9);
+    expect(elapsed).toBeLessThan(9 * 25);
+  });
+
+  it('20 个不同域名没有批次等待', async () => {
+    const urls = Array.from({ length: 20 }, (_, i) => `https://twenty-${i}.example/`);
+    let active = 0;
+    let maxActive = 0;
+    const context = setup({
+      urls,
+      globalConcurrency: 6,
+      check: async () => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await sleep(25);
+        active -= 1;
+        return healthyResult();
+      },
+    });
+
+    await context.scheduler.startScan('all');
+    const startedAt = Date.now();
+    await context.scheduler.requestPass();
+    const elapsed = Date.now() - startedAt;
+
+    expect(maxActive).toBe(6);
+    expect(context.check).toHaveBeenCalledTimes(20);
+    // 固定 10 个/批至少需要两批；动态池应接近 4 个 25ms 波次。
+    expect(elapsed).toBeLessThan(20 * 25);
+  });
+});
+describe('健康检查同域限流基准', () => {
+  it('20 个同域 URL 遵守每域 2 并发', async () => {
+    const urls = Array.from({ length: 20 }, (_, i) => `https://same.example/${i}`);
+    let active = 0;
+    let maxActive = 0;
+    const context = setup({
+      urls,
+      globalConcurrency: 6,
+      perDomainConcurrency: 2,
+      check: async () => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await sleep(10);
+        active -= 1;
+        return healthyResult();
+      },
+    });
+
+    await context.scheduler.startScan('all');
+    await context.scheduler.requestPass();
+
+    expect(maxActive).toBe(2);
+    expect(context.check).toHaveBeenCalledTimes(20);
+  });
+});
+
+describe('健康缓存写入合并', () => {
+  it('20 个 URL 的扫描合并 claim/complete 写入，且状态与进度保持一致', async () => {
+    const count = 20;
+    const urls = Array.from(
+      { length: count },
+      (_, index) => `https://batch-${index}.example/`,
+    );
+    const releases: Array<() => void> = [];
+
+    const context = setup({
+      urls,
+      globalConcurrency: 6,
+      perDomainConcurrency: 2,
+      check: () =>
+        new Promise<WebsiteHealthCheckResult>((resolve) => {
+          releases.push(() => resolve(healthyResult()));
+        }),
+    });
+
+    await context.scheduler.startScan('all');
+    const pass = context.scheduler.requestPass();
+
+    // 每次等一批请求挂起后一起放行，让同一批结果落在同一轮事件循环里。
+    let cursor = 0;
+    while (cursor < count) {
+      await waitFor(() => releases.length > cursor);
+      const wave = releases.slice(cursor);
+      cursor = releases.length;
+      for (const release of wave) {
+        release();
+      }
+    }
+    await pass;
+
+    const snapshot = await context.cache.getSnapshot();
+    expect(context.check).toHaveBeenCalledTimes(count);
+    expect(Object.keys(snapshot.records)).toHaveLength(count);
+    expect(snapshot.pendingUrls).toEqual([]);
+    expect(snapshot.checkingUrls).toEqual([]);
+    expect(snapshot.schemaVersion).toBe(HEALTH_SCHEMA_VERSION);
+    expect(snapshot.scan).toMatchObject({
+      status: 'completed',
+      total: count,
+      completed: count,
+    });
+
+    // 优化前每个任务 claim + complete 各写一次全量状态，共 2 * count + 2 = 42 次。
+    // 合并后只剩每波一次 claim 写入 + 一次完成写入。
+    expect(context.storage.writes).toBeLessThan(2 * count);
+    expect(context.storage.writes).toBeLessThanOrEqual(12);
   });
 });

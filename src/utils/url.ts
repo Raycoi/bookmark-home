@@ -1,3 +1,6 @@
+import { t } from '../i18n';
+import { parseHttpUrl, type HttpUrlFailure } from './httpUrl';
+
 /** 用户输入校验错误，消息可以直接展示在界面上。 */
 export class BookmarkValidationError extends Error {
   constructor(message: string) {
@@ -7,58 +10,71 @@ export class BookmarkValidationError extends Error {
 }
 
 /** 校验并规范化用户输入的书签名称。 */
-export function normalizeBookmarkTitle(input: string, label = '名称'): string {
+export function normalizeBookmarkTitle(
+  input: string,
+  label = t('bookmark.label.name'),
+): string {
   const title = input.trim();
   if (!title) {
-    throw new BookmarkValidationError(`${label}不能为空`);
+    throw new BookmarkValidationError(t('validation.required', { label }));
   }
   return title;
+}
+
+/**
+ * 用户可能输入的显式协议前缀。
+ *
+ * - `scheme://` 形式一律视为写了协议；
+ * - 无 `//` 的已知非 HTTP 协议（mailto:、javascript:、data: 等）也必须原样保留；
+ * - `example.com:8080` 不匹配这里，它会被当作“主机名 + 端口”补全 https，
+ *   而不是误判成 `example.com:` 协议。
+ */
+const EXPLICIT_SCHEME =
+  /^(?:[a-z][a-z\d+.-]*:\/\/|(?:mailto|javascript|data|file|ftp|chrome|chrome-extension|about|blob|view-source):)/i;
+
+function bookmarkUrlErrorMessage(reason: HttpUrlFailure): string {
+  switch (reason) {
+    case 'scheme':
+      return t('validation.urlScheme');
+    case 'missing-host':
+      return t('validation.urlMissingHost');
+    default:
+      return t('validation.urlInvalid');
+  }
 }
 
 /**
  * 校验并规范化用户输入的新增书签网址。
  *
  * 只接受 http/https：避免把 javascript:、data: 等危险协议写入书签。
- * 用户省略协议时按 https 补全。
+ * 用户省略协议时按 https 补全；协议差异、路径和 fragment 由 href 原样保留。
  */
 export function normalizeBookmarkUrl(input: string): string {
   const raw = input.trim();
   if (!raw) {
-    throw new BookmarkValidationError('网址不能为空');
-  }
-
-  const explicitScheme = /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(raw);
-  // 无 // 的非 HTTP 协议（mailto:、javascript:、data: 等）也必须先识别，
-  // 但不能把 example.com:8080 误判成 example.com: 协议。
-  const nonHttpScheme =
-    /^(?:mailto|javascript|data|file|ftp|chrome|chrome-extension|about|blob|view-source):/i.test(
-      raw,
+    throw new BookmarkValidationError(
+      t('validation.required', { label: t('bookmark.label.url') }),
     );
-  const candidate = explicitScheme || nonHttpScheme ? raw : `https://${raw}`;
-
-  let parsed: URL;
-  try {
-    parsed = new URL(candidate);
-  } catch {
-    throw new BookmarkValidationError('网址格式不正确');
   }
 
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new BookmarkValidationError('只支持 http 或 https 网址');
+  const candidate = EXPLICIT_SCHEME.test(raw) ? raw : `https://${raw}`;
+
+  const parsed = parseHttpUrl(candidate);
+  if (!parsed.ok) {
+    throw new BookmarkValidationError(bookmarkUrlErrorMessage(parsed.reason));
   }
 
-  if (!parsed.hostname) {
-    throw new BookmarkValidationError('网址缺少有效域名');
-  }
-
-  return parsed.toString();
+  return parsed.url.href;
 }
 
 /** 校验 Chrome 书签节点 ID。 */
-export function normalizeNodeId(input: string, label = '书签节点 ID'): string {
+export function normalizeNodeId(
+  input: string,
+  label = t('bookmark.label.nodeId'),
+): string {
   const id = input.trim();
   if (!id) {
-    throw new BookmarkValidationError(`${label}不能为空`);
+    throw new BookmarkValidationError(t('validation.required', { label }));
   }
   return id;
 }
@@ -70,7 +86,7 @@ export function normalizeIndex(input: number | undefined): number | undefined {
   }
 
   if (!Number.isInteger(input) || input < 0) {
-    throw new BookmarkValidationError('排序位置必须是非负整数');
+    throw new BookmarkValidationError(t('validation.indexInvalid'));
   }
 
   return input;

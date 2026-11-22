@@ -207,10 +207,8 @@ const privateRecord = records['http://127.0.0.1:43123/private'];
 const summary = await evaluate(
   `document.querySelector('.health-summary')?.textContent?.replace(/\\s+/g, ' ').trim()`,
 );
-const dots = await evaluate(`({
-  all: document.querySelectorAll('.health-indicator').length,
-  privateDots: document.querySelectorAll('.health-indicator--status-private').length,
-})`);
+// 书签项上的 .health-indicator 已随 HealthStatusIndicator 删除，
+// 内网状态改由面板行文案（privateView.status）验证，不再期待不存在的元素。
 
 // 内网筛选
 await evaluate(`(() => {
@@ -252,9 +250,8 @@ const checks = {
       privateRecord === undefined &&
       countPath('/private') === 0 &&
       privateView.status === '内网地址' &&
-      privateView.recheckDisabled === true &&
-      dots.privateDots === 1,
-    details: { privateRecord, privateRequests: countPath('/private'), privateView, dots },
+      privateView.recheckDisabled === true,
+    details: { privateRecord, privateRequests: countPath('/private'), privateView },
   },
   rateLimitMappedToRestricted: {
     ok:

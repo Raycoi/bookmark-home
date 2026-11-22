@@ -6,6 +6,7 @@ import {
 } from '../services/bookmarkService';
 import type { HomepageData } from '../types/bookmark';
 import { getErrorMessage } from '../utils/errors';
+import { t } from '../i18n';
 
 export interface UseBookmarksOptions {
   /** 允许测试注入数据源；生产环境默认为 Chrome Bookmarks 服务。 */
@@ -149,7 +150,9 @@ export function useBookmarks(options: UseBookmarksOptions = {}) {
     try {
       unsubscribe = dataSource.subscribe(scheduleRefresh);
     } catch (caught) {
-      subscriptionError = `监听书签变化失败：${getErrorMessage(caught)}`;
+      subscriptionError = t('bookmark.error.subscribeFailed', {
+        message: getErrorMessage(caught),
+      });
       error.value = subscriptionError;
     }
 
@@ -204,5 +207,5 @@ function formatReadError(error: unknown): string {
   if (error instanceof BookmarkTreeError) {
     return error.message;
   }
-  return `读取书签失败：${getErrorMessage(error)}`;
+  return t('bookmark.error.readFailed', { message: getErrorMessage(error) });
 }

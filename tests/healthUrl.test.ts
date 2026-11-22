@@ -20,9 +20,22 @@ describe('health URL 规范化', () => {
     ).toBe('https://example.com/Tutorial/Chapter-1?b=2&a=1');
   });
 
-  it('保留查询参数顺序，不擅自排序或删除', () => {
+  it('不排序或删除查询参数，但按 href 重新序列化', () => {
     expect(normalizeHealthUrl('https://example.com/search?z=9&a=1&utm=yes')).toBe(
       'https://example.com/search?z=9&a=1&utm=yes',
+    );
+    expect(normalizeHealthUrl('https://example.com/search?q=a b&b=2&a=1')).toBe(
+      'https://example.com/search?q=a%20b&b=2&a=1',
+    );
+  });
+
+  it('省略默认端口、保留非默认端口与尾斜杠', () => {
+    expect(normalizeHealthUrl('HTTPS://EXAMPLE.COM')).toBe('https://example.com/');
+    expect(normalizeHealthUrl('https://example.com:443/')).toBe(
+      'https://example.com/',
+    );
+    expect(normalizeHealthUrl('https://example.com:8443/')).toBe(
+      'https://example.com:8443/',
     );
   });
 
@@ -49,6 +62,7 @@ describe('health URL 规范化', () => {
   it('拒绝无效和非 HTTP(S) 地址', () => {
     expect(normalizeHealthUrl('not a url')).toBeNull();
     expect(normalizeHealthUrl('javascript:alert(1)')).toBeNull();
+    expect(normalizeHealthUrl('mailto:dev@example.com')).toBeNull();
     expect(normalizeHealthUrl('data:text/html,hello')).toBeNull();
     expect(normalizeHealthUrl('file:///etc/hosts')).toBeNull();
     expect(normalizeHealthUrl('chrome://settings')).toBeNull();
@@ -66,7 +80,8 @@ describe('health URL 规范化', () => {
 describe('内网/本机地址保护', () => {
   it.each([
     'http://localhost/',
-    'http://localhost:8080/',
+    'http://LOCALHOST:8080/',
+    'http://localhost./',
     'http://foo.localhost/',
     'http://127.0.0.1/',
     'http://127.1/',
@@ -82,7 +97,7 @@ describe('内网/本机地址保护', () => {
     'http://203.0.113.1/',
     'http://0.0.0.0/',
     'http://[::1]/',
-    'http://[fd00::1]/',
+    'http://[FD00::1]/',
     'http://[fe80::1]/',
     'http://[::ffff:127.0.0.1]/',
     'http://intranet/',
@@ -95,6 +110,7 @@ describe('内网/本机地址保护', () => {
 
   it.each([
     'https://example.com/',
+    'https://EXAMPLE.COM/',
     'https://example.test/',
     'http://8.8.8.8/',
     'http://1.1.1.1/',
@@ -103,6 +119,14 @@ describe('内网/本机地址保护', () => {
     'http://[2001:4860:4860::8888]/',
   ])('放行公网 %s', (url) => {
     expect(isPrivateHealthUrl(normalizeHealthUrl(url) ?? url)).toBe(false);
+  });
+
+  it('私有地址即使能被规范化，也不会被误判为可检测', () => {
+    const normalized = normalizeHealthUrl('  HTTP://LOCALHOST:8080/#top  ');
+
+    expect(normalized).toBe('http://localhost:8080/');
+    expect(isPrivateHealthUrl(normalized ?? '')).toBe(true);
+    expect(isPrivateHealthUrl('not a url')).toBe(true);
   });
 });
 
@@ -125,6 +149,8 @@ describe('从原生书签树收集 URL', () => {
       nativeBookmark('lan', '1', 1, 'LAN', 'http://192.168.1.2/'),
       nativeBookmark('public', '1', 2, 'Public', 'https://example.com/'),
       nativeBookmark('named', '1', 3, 'Named', 'http://intranet/'),
+      nativeBookmark('v6', '1', 4, 'IPv6', 'http://[FD00::1]/'),
+      nativeBookmark('upper', '1', 5, 'Uppercase', 'http://LOCALHOST:8080/'),
     ]);
 
     expect(collectNativeBookmarkUrls(tree)).toEqual(['https://example.com/']);

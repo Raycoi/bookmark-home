@@ -5,6 +5,7 @@ import type {
   WebsiteHealthStatus,
   WebsiteHealthStoredStatus,
 } from '../types/websiteHealth';
+import { t } from '../i18n';
 
 const STORED_STATUSES: readonly WebsiteHealthStoredStatus[] = [
   'healthy',
@@ -16,18 +17,19 @@ const STORED_STATUSES: readonly WebsiteHealthStoredStatus[] = [
   'unknown',
 ];
 
-const STATUS_LABELS: Record<WebsiteHealthStatus, string> = {
-  healthy: '正常',
-  redirected: '已跳转',
-  not_found: '页面不存在',
-  gone: '页面已移除',
-  restricted: '访问受限',
-  server_error: '服务器异常',
-  unknown: '无法确认',
-  pending: '待检测',
-  checking: '检测中',
-  unsupported: '无法检测',
-  private: '内网地址',
+/** 状态到文案 key 的固定映射；状态枚举本身不随语言变化。 */
+const STATUS_LABEL_KEYS: Record<WebsiteHealthStatus, string> = {
+  healthy: 'health.status.healthy',
+  redirected: 'health.status.redirected',
+  not_found: 'health.status.not_found',
+  gone: 'health.status.gone',
+  restricted: 'health.status.restricted',
+  server_error: 'health.status.server_error',
+  unknown: 'health.status.unknown',
+  pending: 'health.status.pending',
+  checking: 'health.status.checking',
+  unsupported: 'health.status.unsupported',
+  private: 'health.status.private',
 };
 
 const STATUS_TONES: Record<
@@ -55,7 +57,7 @@ export function isStoredHealthStatus(value: unknown): value is WebsiteHealthStor
 }
 
 export function healthStatusLabel(status: WebsiteHealthStatus): string {
-  return STATUS_LABELS[status];
+  return t(STATUS_LABEL_KEYS[status]);
 }
 
 export function healthStatusTone(
@@ -81,7 +83,12 @@ export function mapHttpStatus(
   if (httpStatus === 410) {
     return 'gone';
   }
-  if (httpStatus === 401 || httpStatus === 403 || httpStatus === 429) {
+  if (
+    httpStatus === 401 ||
+    httpStatus === 403 ||
+    httpStatus === 429 ||
+    httpStatus === 451
+  ) {
     return 'restricted';
   }
   if (httpStatus >= 500 && httpStatus < 600) {
@@ -159,17 +166,17 @@ export function defaultHealthErrorMessage(
 ): string | undefined {
   switch (status) {
     case 'not_found':
-      return '页面不存在（HTTP 404）';
+      return t('health.error.http404');
     case 'gone':
-      return '页面已移除（HTTP 410）';
+      return t('health.error.http410');
     case 'restricted':
-      return `访问受限（HTTP ${httpStatus ?? 401}）`;
+      return t('health.error.httpRestricted', { status: httpStatus ?? 401 });
     case 'server_error':
-      return `服务器返回异常（HTTP ${httpStatus ?? 500}）`;
+      return t('health.error.httpServerError', { status: httpStatus ?? 500 });
     case 'unknown':
       return httpStatus !== undefined
-        ? `无法确认网站状态（HTTP ${httpStatus}）`
-        : '网络连接异常，暂时无法确认网站状态';
+        ? t('health.error.httpUnknown', { status: httpStatus })
+        : t('health.error.networkTemporary');
     default:
       return undefined;
   }

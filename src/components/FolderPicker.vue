@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useId } from 'vue';
 import FolderPickerNode from './FolderPickerNode.vue';
+import { useI18n } from '../i18n';
 import type { FolderOption } from '../utils/folders';
 
 defineProps<{
@@ -14,10 +15,11 @@ const emit = defineEmits<{
 }>();
 
 const groupName = useId();
+const { t } = useI18n();
 </script>
 
 <template>
-  <div class="folder-picker" role="radiogroup" aria-label="选择目标文件夹">
+  <div class="folder-picker" role="radiogroup" :aria-label="t('folderPicker.group')">
     <ul class="folder-picker__root">
       <FolderPickerNode
         v-for="option in tree"

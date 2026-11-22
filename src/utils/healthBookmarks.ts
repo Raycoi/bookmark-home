@@ -4,6 +4,7 @@ import type {
   HomepageSection,
 } from '../types/bookmark';
 import { normalizeHealthUrl } from './healthUrl';
+import { t } from '../i18n';
 
 /** 健康检查面板中的一个完整 URL 条目；相同 URL 的多个书签合并计数。 */
 export interface HealthBookmarkEntry {
@@ -47,7 +48,7 @@ export function collectHomepageHealthEntries(
   ];
 
   for (const section of sections) {
-    const sectionTitle = section.title.trim() || '未命名区域';
+    const sectionTitle = section.title.trim() || t('common.unnamedSection');
     visitFolder(
       section,
       sectionTitle,
@@ -71,7 +72,7 @@ function visitFolder(
 ): void {
   for (const child of folder.children) {
     if (child.type === 'folder') {
-      const title = child.title.trim() || '未命名文件夹';
+      const title = child.title.trim() || t('common.unnamedFolder');
       visitFolder(child, `${path} / ${title}`, entries, section);
       continue;
     }
@@ -91,7 +92,7 @@ function visitFolder(
       key,
       rawUrl,
       normalizedUrl,
-      title: child.title.trim() || '未命名书签',
+      title: child.title.trim() || t('common.unnamedBookmark'),
       folderPath: path,
       bookmarkId: child.id,
       parentId: child.parentId,

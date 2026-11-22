@@ -1,52 +1,36 @@
 import type { NativeBookmarkNode } from '../types/bookmark';
+import { parseHttpUrl } from './httpUrl';
 
 /**
  * 把书签 URL 规范化为健康检查缓存键。
  *
  * - 去除首尾空格；
- * - 标准 URL 解析；
- * - 主机名由 URL 解析器统一小写；
- * - 保留路径和查询参数顺序；
- * - 去除 fragment；
- * - 保留 HTTP/HTTPS 协议差异；
- * - 非 HTTP(S) 或无效 URL 返回 null。
+ * - 只接受 http/https，其余协议与无效地址返回 null；
+ * - 主机名、默认端口与路径点段由 URL 解析器统一规范化（主机名小写，
+ *   https 的 :443、http 的 :80 会被省略）；
+ * - 查询字符串随 href 一起重新序列化：参数顺序与重复键会保留，
+ *   但百分号编码等细节以 URL 序列化结果为准，不保证与原始文本逐字节一致；
+ * - 去除 fragment，使同一页面的不同锚点共用缓存键；
+ * - 保留 HTTP/HTTPS 协议差异。
  */
 export function normalizeHealthUrl(input: string | null | undefined): string | null {
   if (typeof input !== 'string') {
     return null;
   }
 
-  const trimmed = input.trim();
-  if (trimmed.length === 0) {
+  const parsed = parseHttpUrl(input);
+  if (!parsed.ok) {
     return null;
   }
 
-  let parsed: URL;
-  try {
-    parsed = new URL(trimmed);
-  } catch {
-    return null;
-  }
-
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    return null;
-  }
-
-  parsed.hash = '';
-  return parsed.href;
+  parsed.url.hash = '';
+  return parsed.url.href;
 }
 
 /** 规范化 URL 的域名，用于同域并发限制。 */
 export function getHealthDomain(normalizedUrl: string): string | null {
-  try {
-    const parsed = new URL(normalizedUrl);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return null;
-    }
-    return parsed.hostname.toLowerCase();
-  } catch {
-    return null;
-  }
+  const parsed = parseHttpUrl(normalizedUrl);
+  return parsed.ok ? parsed.hostname : null;
 }
 
 const PRIVATE_HOST_SUFFIXES = [
@@ -65,17 +49,19 @@ const PRIVATE_HOST_SUFFIXES = [
  * 不做 DNS 解析，只检查 URL 字面主机名；用于阻止把书签健康检查变成
  * 对内网服务、本机端口或云元数据地址的探测。公网域名若解析到内网 IP，
  * 仍需依赖浏览器/网络层的防护；这里不声称能阻止 DNS rebinding。
+ *
+ * 无法解析或不是 HTTP(S) 的输入一律按不安全处理（fail-closed），
+ * 因为健康检查只面向公网 HTTP(S) 书签。
  */
 export function isPrivateHealthUrl(normalizedUrl: string): boolean {
-  let hostname: string;
-  try {
-    hostname = new URL(normalizedUrl).hostname.toLowerCase();
-  } catch {
+  const parsed = parseHttpUrl(normalizedUrl);
+  if (!parsed.ok) {
     return true;
   }
 
-  let host = hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '');
-  host = host.split('%')[0] ?? host;
+  // URL 解析器已统一小写；IPv6 主机名保留方括号，这里去掉后再判断。
+  const unwrapped = parsed.hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  const [host = ''] = unwrapped.split('%');
   if (!host) {
     return true;
   }

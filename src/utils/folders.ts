@@ -1,10 +1,12 @@
 import type {
+  HomepageBookmark,
   HomepageData,
   HomepageFolder,
   HomepageNode,
   HomepageSection,
 } from '../types/bookmark';
 import { countBookmarks } from './bookmarkCounts';
+import { t } from '../i18n';
 
 export interface FolderOption {
   id: string;
@@ -63,7 +65,7 @@ function toFolderOption(
 
   return {
     id: folder.id,
-    title: folder.title.trim() || '未命名文件夹',
+    title: folder.title.trim() || t('common.unnamedFolder'),
     isSection,
     children,
   };
@@ -148,6 +150,52 @@ function findChildren(folder: HomepageFolder, folderId: string): HomepageNode[] 
   return null;
 }
 
+/** 在完整主页树中按 ID 找到网址书签。 */
+export function findHomepageBookmark(
+  data: HomepageData | null,
+  bookmarkId: string,
+): HomepageBookmark | null {
+  if (!data) {
+    return null;
+  }
+
+  const sections: HomepageSection[] = [
+    data.bookmarksBar,
+    data.otherBookmarks,
+    ...(data.mobileBookmarks ? [data.mobileBookmarks] : []),
+    ...data.extraSections,
+  ];
+
+  for (const section of sections) {
+    const found = findBookmark(section, bookmarkId);
+    if (found) {
+      return found;
+    }
+  }
+
+  return null;
+}
+
+function findBookmark(
+  folder: HomepageFolder,
+  bookmarkId: string,
+): HomepageBookmark | null {
+  for (const child of folder.children) {
+    if (child.type === 'bookmark') {
+      if (child.id === bookmarkId) {
+        return child;
+      }
+      continue;
+    }
+    const found = findBookmark(child, bookmarkId);
+    if (found) {
+      return found;
+    }
+  }
+
+  return null;
+}
+
 /** 统计文件夹内全部后代书签和子文件夹数量。 */
 export function summarizeFolderContents(folder: HomepageFolder): FolderContentSummary {
   let folderCount = 0;
@@ -171,5 +219,82 @@ export function summarizeFolderContents(folder: HomepageFolder): FolderContentSu
 
 /** 取得文件夹或网址的展示名称。 */
 export function getNodeTitle(node: HomepageFolder | HomepageNode): string {
-  return node.title.trim() || (node.type === 'folder' ? '未命名文件夹' : '未命名书签');
+  return (
+    node.title.trim() ||
+    (node.type === 'folder'
+      ? t('common.unnamedFolder')
+      : t('common.unnamedBookmark'))
+  );
+}
+
+/** 收集可用于多选的文件夹和书签，按主页展示顺序排列。 */
+export function collectSelectableIds(data: HomepageData | null): string[] {
+  if (!data) {
+    return [];
+  }
+  const ids: string[] = [];
+  const visit = (folder: HomepageFolder, includeFolder: boolean): void => {
+    if (includeFolder) {
+      ids.push(folder.id);
+    }
+    for (const child of folder.children) {
+      if (child.type === 'bookmark') {
+        ids.push(child.id);
+      } else {
+        visit(child, true);
+      }
+    }
+  };
+  for (const section of [
+    data.bookmarksBar,
+    ...(data.mobileBookmarks ? [data.mobileBookmarks] : []),
+    ...data.extraSections,
+    data.otherBookmarks,
+  ]) {
+    for (const child of section.children) {
+      if (child.type === 'bookmark') {
+        ids.push(child.id);
+      } else {
+        visit(child, true);
+      }
+    }
+  }
+  return ids;
+}
+
+/** 按 ID 找到文件夹。 */
+export function findHomepageFolder(
+  data: HomepageData | null,
+  folderId: string,
+): HomepageFolder | null {
+  if (!data) {
+    return null;
+  }
+  const sections: HomepageSection[] = [
+    data.bookmarksBar,
+    data.otherBookmarks,
+    ...(data.mobileBookmarks ? [data.mobileBookmarks] : []),
+    ...data.extraSections,
+  ];
+  const visit = (folder: HomepageFolder): HomepageFolder | null => {
+    if (folder.id === folderId) {
+      return folder;
+    }
+    for (const child of folder.children) {
+      if (child.type === 'folder') {
+        const found = visit(child);
+        if (found) {
+          return found;
+        }
+      }
+    }
+    return null;
+  };
+  for (const section of sections) {
+    const found = visit(section);
+    if (found) {
+      return found;
+    }
+  }
+  return null;
 }

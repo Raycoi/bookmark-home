@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from '../i18n';
+
 withDefaults(
   defineProps<{
     message: string;
@@ -12,6 +14,8 @@ withDefaults(
 defineEmits<{
   retry: [];
 }>();
+
+const { t } = useI18n();
 </script>
 
 <template>
@@ -38,7 +42,7 @@ defineEmits<{
     </svg>
     <p class="error-notice__message">{{ message }}</p>
     <button class="error-notice__retry" type="button" @click="$emit('retry')">
-      重试
+      {{ t('common.retry') }}
     </button>
   </div>
 </template>

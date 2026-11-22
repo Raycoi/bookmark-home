@@ -13,12 +13,12 @@ export const HEALTH_NEXT_CHECK_MS: Record<WebsiteHealthStoredStatus, number> = {
   unknown: 60 * 60 * 1000,
 };
 
-export const HEALTH_TIMEOUT_MS = 10_000;
-export const HEALTH_RETRY_DELAY_MS = 3_000;
+export const HEALTH_TIMEOUT_MS = 8_000;
+export const HEALTH_INITIAL_TIMEOUT_MS = 3_000;
+export const HEALTH_RETRY_DELAY_MS = 1_500;
 export const HEALTH_MAX_RETRIES = 1;
-export const HEALTH_GLOBAL_CONCURRENCY = 3;
-export const HEALTH_MAX_TASKS_PER_PASS = 10;
-export const HEALTH_CONTINUATION_DELAY_MS = 1_000;
+export const HEALTH_GLOBAL_CONCURRENCY = 6;
+export const HEALTH_PER_DOMAIN_CONCURRENCY = 2;
 export const HEALTH_CACHE_RETENTION_MS = 30 * DAY_MS;
 export const HEALTH_RECOVERY_LIMIT = 3;
 export const HEALTH_NEW_BOOKMARK_DELAY_MS = 5_000;

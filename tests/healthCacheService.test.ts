@@ -213,7 +213,7 @@ describe('health storage 版本与并发', () => {
     expect(state.schemaVersion).toBe(HEALTH_SCHEMA_VERSION);
   });
 
-  it('缓存服务串行化并发更新，不丢任务', async () => {
+  it('缓存服务串行化并发更新，不丢任务，并合并为一次写入', async () => {
     const storage = new MemoryStorage();
     const cache = createHealthCacheService(storage, () => 1_000);
 
@@ -231,7 +231,93 @@ describe('health storage 版本与并发', () => {
       'https://a.example/',
       'https://b.example/',
     ]);
-    expect(storage.writes).toBe(2);
+    // 同一轮事件循环提交的两个 update 合并成一次全量写入（优化前是 2 次）。
+    expect(storage.writes).toBe(1);
+  });
+
+  it('同批并发更新共享一次写入，read 能看到全部结果', async () => {
+    const storage = new MemoryStorage();
+    const cache = createHealthCacheService(storage, () => 1_000);
+
+    await Promise.all([
+      cache.update((state) => {
+        upsertHealthTask(state, 'https://a.example/', 'manual', 1_000);
+      }),
+      cache.update((state) => {
+        saveHealthRecord(state, makeRecord('https://b.example/'));
+      }),
+      cache.update((state) => {
+        state.ignoredUrls.push('https://c.example/');
+      }),
+    ]);
+
+    expect(storage.writes).toBe(1);
+
+    const state = await cache.read();
+    expect(state.tasks.map((task) => task.url)).toEqual(['https://a.example/']);
+    expect(Object.keys(state.records)).toEqual(['https://b.example/']);
+    expect(state.ignoredUrls).toEqual(['https://c.example/']);
+    expect(state.schemaVersion).toBe(HEALTH_SCHEMA_VERSION);
+  });
+
+  it('read 会先落盘尚未合并的写入', async () => {
+    const storage = new MemoryStorage();
+    const cache = createHealthCacheService(storage, () => 1_000);
+
+    const write = cache.update((state) => {
+      upsertHealthTask(state, 'https://a.example/', 'manual', 1_000);
+    });
+    const state = await cache.read();
+    await write;
+
+    expect(state.tasks.map((task) => task.url)).toEqual(['https://a.example/']);
+    expect(storage.writes).toBe(1);
+    const stored = storage.data[HEALTH_STATE_STORAGE_KEY] as {
+      tasks: unknown[];
+    };
+    expect(stored.tasks).toHaveLength(1);
+  });
+
+  it('无实际变化的更新不写 storage，也不推进 updatedAt', async () => {
+    const storage = new MemoryStorage();
+    let now = 1_000;
+    const cache = createHealthCacheService(storage, () => now);
+
+    await cache.update((state) => {
+      upsertHealthTask(state, 'https://a.example/', 'manual', 1_000);
+    });
+    expect(storage.writes).toBe(1);
+
+    now = 2_000;
+    await cache.update(() => undefined);
+    await cache.update((state) => {
+      // 内容相同但对象是新引用时同样应被判定为无变化。
+      state.tasks = state.tasks.map((task) => ({ ...task }));
+    });
+
+    expect(storage.writes).toBe(1);
+    const snapshot = await cache.getSnapshot();
+    expect(snapshot.updatedAt).toBe(1_000);
+    expect(snapshot.pendingUrls).toEqual(['https://a.example/']);
+  });
+
+  it('单个 update 抛错只影响自己，其他更新仍然落盘', async () => {
+    const storage = new MemoryStorage();
+    const cache = createHealthCacheService(storage, () => 1_000);
+
+    const failed = cache.update(() => {
+      throw new Error('mutator boom');
+    });
+    const succeeded = cache.update((state) => {
+      upsertHealthTask(state, 'https://ok.example/', 'manual', 1_000);
+    });
+
+    await expect(failed).rejects.toThrow('mutator boom');
+    await succeeded;
+
+    const state = await cache.read();
+    expect(state.tasks.map((task) => task.url)).toEqual(['https://ok.example/']);
+    expect(storage.writes).toBe(1);
   });
 
   it('通过缓存服务保存记录并返回快照', async () => {
@@ -247,6 +333,46 @@ describe('health storage 版本与并发', () => {
     const snapshot = await cache.getSnapshot();
     expect(snapshot.records['https://a.example/']?.status).toBe('healthy');
     expect(snapshot.pendingUrls).toEqual(['https://b.example/']);
+    expect(snapshot.updatedAt).toBe(1_000);
+  });
+
+  it('schemaVersion=1 的旧数据可直接读取，不触发迁移写入', async () => {
+    const storage = new MemoryStorage();
+    storage.data[HEALTH_STATE_STORAGE_KEY] = {
+      schemaVersion: HEALTH_SCHEMA_VERSION,
+      records: { 'https://a.example/': makeRecord('https://a.example/') },
+      tasks: [
+        {
+          url: 'https://b.example/',
+          source: 'manual',
+          priority: HEALTH_TASK_PRIORITY.manual,
+          createdAt: 1_000,
+          notBefore: 1_000,
+          status: 'pending',
+          recoveryCount: 0,
+        },
+      ],
+      scan: {
+        id: 'scan-1',
+        mode: 'all',
+        status: 'running',
+        total: 2,
+        completed: 1,
+        startedAt: 900,
+      },
+      ignoredUrls: ['https://ignored.example/'],
+      updatedAt: 1_000,
+    };
+
+    const cache = createHealthCacheService(storage, () => 5_000);
+    const snapshot = await cache.getSnapshot();
+
+    expect(storage.writes).toBe(0);
+    expect(snapshot.schemaVersion).toBe(HEALTH_SCHEMA_VERSION);
+    expect(snapshot.records['https://a.example/']?.status).toBe('healthy');
+    expect(snapshot.pendingUrls).toEqual(['https://b.example/']);
+    expect(snapshot.scan).toMatchObject({ id: 'scan-1', completed: 1 });
+    expect(snapshot.ignoredUrls).toEqual(['https://ignored.example/']);
     expect(snapshot.updatedAt).toBe(1_000);
   });
 });

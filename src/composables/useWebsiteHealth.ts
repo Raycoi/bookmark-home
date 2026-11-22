@@ -30,6 +30,7 @@ import {
 } from '../utils/healthStatus';
 import { isPrivateHealthUrl, normalizeHealthUrl } from '../utils/healthUrl';
 import { getErrorMessage } from '../utils/errors';
+import { t } from '../i18n';
 
 export interface HealthStatusView {
   rawUrl: string;
@@ -55,12 +56,7 @@ export interface HealthCounts {
   unsupported: number;
   private: number;
   unlisted: number;
-}
-
-export interface HealthDetailState {
-  rawUrl: string;
-  x: number;
-  y: number;
+  ignored: number;
 }
 
 export interface UseWebsiteHealthOptions {
@@ -86,7 +82,7 @@ export function useWebsiteHealthContext(): WebsiteHealthContext | null {
 export function useWebsiteHealth(options: UseWebsiteHealthOptions) {
   const snapshot = shallowRef<HealthSnapshot | null>(null);
   const loaded = ref(false);
-  const loading = ref(true);
+  const loading = ref(false);
   const error = ref<string | null>(null);
   const notice = ref<string | null>(null);
   const noticeTone = ref<'success' | 'error'>('success');
@@ -94,21 +90,37 @@ export function useWebsiteHealth(options: UseWebsiteHealthOptions) {
   const currentNow = ref(Date.now());
   const panelOpen = ref(false);
   const activeFilter = ref<HealthFilter>('all');
-  const detail = ref<HealthDetailState | null>(null);
 
   let refreshTimer: ReturnType<typeof setTimeout> | null = null;
   let snapshotRequestId = 0;
+  // action 进行中收到的刷新请求只记一次，结束后补一次快照读取。
+  let pendingRefresh = false;
 
   const entries = computed(() => collectHomepageHealthEntries(options.homepage.value));
   const checkingSet = computed(
     () => new Set(snapshot.value?.checkingUrls ?? []),
   );
+  const ignoredSet = computed(
+    () => new Set(snapshot.value?.ignoredUrls ?? []),
+  );
+
+  const ignoredEntries = computed(() =>
+    entries.value.filter((entry) => {
+      const url = normalizeHealthUrl(entry.rawUrl);
+      return Boolean(url && ignoredSet.value.has(url));
+    }),
+  );
 
   const views = computed<HealthBookmarkView[]>(() =>
-    entries.value.map((entry) => {
-      const view = buildView(entry.rawUrl, snapshot.value, checkingSet.value, currentNow.value);
-      return { ...view, entry };
-    }),
+    entries.value
+      .filter((entry) => {
+        const url = normalizeHealthUrl(entry.rawUrl);
+        return !url || !ignoredSet.value.has(url);
+      })
+      .map((entry) => {
+        const view = buildView(entry.rawUrl, snapshot.value, checkingSet.value, currentNow.value);
+        return { ...view, entry };
+      }),
   );
 
   const counts = computed<HealthCounts>(() => {
@@ -122,6 +134,7 @@ export function useWebsiteHealth(options: UseWebsiteHealthOptions) {
       unsupported: 0,
       private: 0,
       unlisted: 0,
+      ignored: ignoredEntries.value.length,
     };
 
     for (const view of views.value) {
@@ -152,6 +165,7 @@ export function useWebsiteHealth(options: UseWebsiteHealthOptions) {
   const abnormalCount = computed(() => counts.value.abnormal);
   const scan = computed(() => snapshot.value?.scan ?? null);
   const scanRunning = computed(() => scan.value?.status === 'running');
+  const retryCount = computed(() => snapshot.value?.retryUrls.length ?? 0);
   const progressPercent = computed(() => {
     const current = scan.value;
     if (!current || current.total === 0) {
@@ -165,20 +179,6 @@ export function useWebsiteHealth(options: UseWebsiteHealthOptions) {
     return filtered.sort(compareViews);
   });
 
-  const detailView = computed<HealthStatusView | null>(() => {
-    if (!detail.value) {
-      return null;
-    }
-    const entry = entries.value.find(
-      (item) =>
-        item.rawUrl === detail.value?.rawUrl ||
-        item.normalizedUrl === normalizeHealthUrl(detail.value?.rawUrl),
-    );
-    return entry
-      ? buildView(entry.rawUrl, snapshot.value, checkingSet.value, currentNow.value)
-      : buildView(detail.value.rawUrl, snapshot.value, checkingSet.value, currentNow.value);
-  });
-
   function viewForUrl(rawUrl: string): HealthStatusView | null {
     if (!loaded.value) {
       return null;
@@ -188,6 +188,8 @@ export function useWebsiteHealth(options: UseWebsiteHealthOptions) {
 
   async function loadSnapshot(): Promise<void> {
     if (actionBusy.value) {
+      // 不直接丢弃：action 结束后统一补刷新，避免 storage 变更永久丢失。
+      pendingRefresh = true;
       return;
     }
 
@@ -202,7 +204,7 @@ export function useWebsiteHealth(options: UseWebsiteHealthOptions) {
         return;
       }
       if (!response.ok || !response.snapshot) {
-        error.value = response.error ?? '读取健康检查缓存失败';
+        error.value = response.error ?? t('health.error.cacheRead');
         return;
       }
 
@@ -212,23 +214,34 @@ export function useWebsiteHealth(options: UseWebsiteHealthOptions) {
       const nextScan = response.snapshot.scan;
       if (previousScan?.status === 'running' && nextScan?.status === 'completed') {
         noticeTone.value = 'success';
-        notice.value = '检测完成';
+        notice.value = t('health.notice.completed');
       } else if (
         previousScan?.status === 'running' &&
         nextScan?.status === 'cancelled'
       ) {
         noticeTone.value = 'success';
-        notice.value = '检测已取消';
+        notice.value = t('health.notice.cancelled');
       }
     } catch (caught) {
       if (requestId === snapshotRequestId) {
-        error.value = `读取健康检查缓存失败：${getErrorMessage(caught)}`;
+        error.value = t('health.error.cacheReadDetail', {
+          message: getErrorMessage(caught),
+        });
       }
     } finally {
       if (requestId === snapshotRequestId) {
         loading.value = false;
       }
     }
+  }
+
+  /** 消费排队标记并补一次快照读取；同一时间只保留一个待办刷新。 */
+  function flushPendingRefresh(): void {
+    if (!pendingRefresh) {
+      return;
+    }
+    pendingRefresh = false;
+    void loadSnapshot();
   }
 
   function scheduleRefresh(): void {
@@ -277,7 +290,7 @@ export function useWebsiteHealth(options: UseWebsiteHealthOptions) {
       }
       if (!response.ok) {
         noticeTone.value = 'error';
-        notice.value = response.error ?? '健康检查操作失败';
+        notice.value = response.error ?? t('health.error.actionFailed');
         return;
       }
 
@@ -291,38 +304,55 @@ export function useWebsiteHealth(options: UseWebsiteHealthOptions) {
     } catch (caught) {
       if (actionRequestId === snapshotRequestId) {
         noticeTone.value = 'error';
-        notice.value = `健康检查操作失败：${getErrorMessage(caught)}`;
+        notice.value = t('health.error.actionFailedDetail', {
+          message: getErrorMessage(caught),
+        });
       }
     } finally {
       actionBusy.value = false;
+      flushPendingRefresh();
     }
   }
 
   function checkAll(): Promise<void> {
     return runAction(
       () => sendHealthMessage({ type: 'HEALTH_CHECK_ALL' }),
-      '已加入全部书签检测队列',
+      t('health.notice.queuedAll'),
     );
   }
 
   function checkAbnormal(): Promise<void> {
     return runAction(
       () => sendHealthMessage({ type: 'HEALTH_CHECK_ABNORMAL' }),
-      '已加入异常网站检测队列',
+      t('health.notice.queuedAbnormal'),
     );
   }
 
   function recheck(rawUrl: string): Promise<void> {
     return runAction(
       () => sendHealthMessage({ type: 'HEALTH_RECHECK_URL', url: rawUrl }),
-      '已加入重新检测队列',
+      t('health.notice.queuedRecheck'),
+    );
+  }
+
+  function ignore(rawUrl: string): Promise<void> {
+    return runAction(
+      () => sendHealthMessage({ type: 'HEALTH_IGNORE_URL', url: rawUrl }),
+      t('health.notice.ignored'),
+    );
+  }
+
+  function unignore(rawUrl: string): Promise<void> {
+    return runAction(
+      () => sendHealthMessage({ type: 'HEALTH_UNIGNORE_URL', url: rawUrl }),
+      t('health.notice.restored'),
     );
   }
 
   function cancelScan(): Promise<void> {
     return runAction(
       () => sendHealthMessage({ type: 'HEALTH_CANCEL_SCAN' }),
-      '已取消尚未执行的检测任务',
+      t('health.notice.cancelledPending'),
     );
   }
 
@@ -330,6 +360,9 @@ export function useWebsiteHealth(options: UseWebsiteHealthOptions) {
     activeFilter.value = filter;
     panelOpen.value = true;
     currentNow.value = Date.now();
+    if (!loaded.value && !loading.value) {
+      void loadSnapshot();
+    }
   }
 
   function closePanel(): void {
@@ -340,28 +373,7 @@ export function useWebsiteHealth(options: UseWebsiteHealthOptions) {
     activeFilter.value = filter;
   }
 
-  function openDetail(rawUrl: string, x: number, y: number): void {
-    currentNow.value = Date.now();
-    notice.value = null;
-    detail.value = { rawUrl, x, y };
-  }
-
-  function closeDetail(): void {
-    detail.value = null;
-  }
-
-  function openPanelFromDetail(): void {
-    if (!detail.value) {
-      return;
-    }
-    detail.value = null;
-    panelOpen.value = true;
-    activeFilter.value = 'all';
-    currentNow.value = Date.now();
-  }
-
   onMounted(() => {
-    void loadSnapshot();
     if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
       chrome.storage.onChanged.addListener(onStorageChanged);
     }
@@ -375,6 +387,7 @@ export function useWebsiteHealth(options: UseWebsiteHealthOptions) {
       clearTimeout(refreshTimer);
       refreshTimer = null;
     }
+    pendingRefresh = false;
     if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
       chrome.storage.onChanged.removeListener(onStorageChanged);
     }
@@ -394,24 +407,23 @@ export function useWebsiteHealth(options: UseWebsiteHealthOptions) {
     abnormalCount,
     scan,
     scanRunning,
+    retryCount,
     progressPercent,
     filteredViews,
+    ignoredEntries,
     activeFilter,
     panelOpen,
-    detail,
-    detailView,
     loadSnapshot,
     viewForUrl,
     checkAll,
     checkAbnormal,
     recheck,
+    ignore,
+    unignore,
     cancelScan,
     openPanel,
     closePanel,
     setFilter,
-    openDetail,
-    closeDetail,
-    openPanelFromDetail,
   };
 }
 
@@ -512,7 +524,7 @@ function statusSortWeight(status: WebsiteHealthStatus): number {
 function sendHealthMessage(message: HealthRequest): Promise<HealthResponse> {
   return new Promise((resolve, reject) => {
     if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) {
-      reject(new Error('当前环境无法连接扩展后台'));
+      reject(new Error(t('health.error.extensionUnavailable')));
       return;
     }
 
@@ -525,7 +537,7 @@ function sendHealthMessage(message: HealthRequest): Promise<HealthResponse> {
           return;
         }
         if (!response) {
-          reject(new Error('扩展后台没有返回健康检查数据'));
+          reject(new Error(t('health.error.noResponse')));
           return;
         }
         resolve(response);

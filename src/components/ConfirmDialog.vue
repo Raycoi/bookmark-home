@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import BaseDialog from './BaseDialog.vue';
+import { useI18n } from '../i18n';
 import type { ConfirmDialogState } from '../types/management';
 
 defineProps<{
@@ -12,12 +13,14 @@ const emit = defineEmits<{
   confirm: [];
   cancel: [];
 }>();
+
+const { t } = useI18n();
 </script>
 
 <template>
   <BaseDialog
     :title="state.title"
-    description="请确认这次对 Chrome 原生书签的修改。"
+    :description="t('confirm.description')"
     :busy="busy"
     @close="emit('cancel')"
   >
@@ -40,7 +43,7 @@ const emit = defineEmits<{
           :disabled="busy"
           @click="emit('cancel')"
         >
-          取消
+          {{ t('common.cancel') }}
         </button>
         <button
           class="bh-button bh-button--danger"
@@ -48,7 +51,7 @@ const emit = defineEmits<{
           :disabled="busy"
           @click="emit('confirm')"
         >
-          {{ busy ? '处理中…' : state.confirmLabel }}
+          {{ busy ? t('confirm.processing') : state.confirmLabel }}
         </button>
       </div>
     </template>

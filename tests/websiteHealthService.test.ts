@@ -51,6 +51,7 @@ describe('HTTP 健康检测', () => {
     [503, 'server_error'],
     [400, 'unknown'],
     [429, 'restricted'],
+    [451, 'restricted'],
   ] as const)('HTTP %i -> %s', async (httpStatus, expected) => {
     const { result } = await checkStatus(httpStatus);
     expect(result.status).toBe(expected);
@@ -242,5 +243,57 @@ describe('健康检测超时、网络错误与重试', () => {
       checkWebsiteHealth('http://127.0.0.1:43123/', { fetchImpl }),
     ).rejects.toBeInstanceOf(PrivateHealthUrlError);
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe('HTML 内容审计', () => {
+  function htmlResponse(body: string): Response {
+    const result = new Response(body, {
+      status: 200,
+      headers: {
+        'content-type': 'text/html; charset=utf-8',
+        'content-length': String(body.length),
+      },
+    });
+    Object.defineProperty(result, 'url', { configurable: true, value: 'https://example.com/page' });
+    return result;
+  }
+
+  function headHtmlResponse(): Response {
+    const result = new Response(null, {
+      status: 200,
+      headers: {
+        'content-type': 'text/html; charset=utf-8',
+        'content-length': '100',
+      },
+    });
+    Object.defineProperty(result, 'url', { configurable: true, value: 'https://example.com/page' });
+    return result;
+  }
+
+  it('200 但标题是 404 时识别为软 404', async () => {
+    const fetchImpl = vi
+      .fn<HealthFetch>()
+      .mockResolvedValueOnce(headHtmlResponse())
+      .mockResolvedValueOnce(htmlResponse('<html><head><title>404 Not Found</title></head></html>'));
+    const result = await checkWebsiteHealth('https://example.com/page', {
+      fetchImpl,
+      maxRetries: 0,
+    });
+    expect(result.status).toBe('not_found');
+    expect(result.errorMessage).toContain('软 404');
+  });
+
+  it('200 登录页识别为访问受限而不是正常', async () => {
+    const fetchImpl = vi
+      .fn<HealthFetch>()
+      .mockResolvedValueOnce(headHtmlResponse())
+      .mockResolvedValueOnce(htmlResponse('<html><head><title>Sign in</title></head><body><form><input type="password"></form></body></html>'));
+    const result = await checkWebsiteHealth('https://example.com/page', {
+      fetchImpl,
+      maxRetries: 0,
+    });
+    expect(result.status).toBe('restricted');
+    expect(result.errorMessage).toContain('登录');
   });
 });

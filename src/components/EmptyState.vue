@@ -5,8 +5,8 @@ withDefaults(
     hint?: string;
   }>(),
   {
-    title: '书签栏还是空的',
-    hint: '在 Chrome 书签栏添加网址或文件夹，主页会自动更新。',
+    title: '',
+    hint: '',
   },
 );
 </script>
@@ -28,8 +28,8 @@ withDefaults(
         stroke-linejoin="round"
       />
     </svg>
-    <h2 class="empty-state__title">{{ title }}</h2>
-    <p class="empty-state__hint">{{ hint }}</p>
+    <h2 class="empty-state__title">{{ title || $t('书签栏还是空的') }}</h2>
+    <p class="empty-state__hint">{{ hint || $t('在 Chrome 书签栏添加网址或文件夹，主页会自动更新。') }}</p>
   </div>
 </template>
 

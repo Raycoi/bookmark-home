@@ -3,12 +3,15 @@ import type {
   HealthResponse,
   HealthSnapshot,
 } from '../types/websiteHealth';
+import { t } from '../i18n';
 import type { HealthCheckScheduler } from './healthCheckScheduler';
 
 export interface HealthMessageScheduler {
   startScan: HealthCheckScheduler['startScan'];
   cancelScan: HealthCheckScheduler['cancelScan'];
   recheck: HealthCheckScheduler['recheck'];
+  ignoreUrl: HealthCheckScheduler['ignoreUrl'];
+  unignoreUrl: HealthCheckScheduler['unignoreUrl'];
   getSnapshot: HealthCheckScheduler['getSnapshot'];
 }
 
@@ -24,6 +27,8 @@ export function isHealthRequest(value: unknown): value is HealthRequest {
     type === 'HEALTH_CHECK_ALL' ||
     type === 'HEALTH_CHECK_ABNORMAL' ||
     type === 'HEALTH_RECHECK_URL' ||
+    type === 'HEALTH_IGNORE_URL' ||
+    type === 'HEALTH_UNIGNORE_URL' ||
     type === 'HEALTH_CANCEL_SCAN'
   );
 }
@@ -56,11 +61,33 @@ export async function handleHealthRequest(
 
       case 'HEALTH_RECHECK_URL': {
         if (typeof message.url !== 'string' || message.url.trim().length === 0) {
-          return { ok: false, error: '缺少要检测的 URL' };
+          return { ok: false, error: t('health.error.missingCheckUrl') };
         }
         const accepted = await scheduler.recheck(message.url);
         if (!accepted) {
-          return { ok: false, error: '该 URL 不支持检测' };
+          return { ok: false, error: t('health.error.unsupportedUrl') };
+        }
+        return snapshotResponse(await scheduler.getSnapshot());
+      }
+
+      case 'HEALTH_IGNORE_URL': {
+        if (typeof message.url !== 'string' || message.url.trim().length === 0) {
+          return { ok: false, error: t('health.error.missingIgnoreUrl') };
+        }
+        const ignored = await scheduler.ignoreUrl(message.url);
+        if (!ignored) {
+          return { ok: false, error: t('health.error.cannotIgnore') };
+        }
+        return snapshotResponse(await scheduler.getSnapshot());
+      }
+
+      case 'HEALTH_UNIGNORE_URL': {
+        if (typeof message.url !== 'string' || message.url.trim().length === 0) {
+          return { ok: false, error: t('health.error.missingRestoreUrl') };
+        }
+        const restored = await scheduler.unignoreUrl(message.url);
+        if (!restored) {
+          return { ok: false, error: t('health.error.notIgnored') };
         }
         return snapshotResponse(await scheduler.getSnapshot());
       }
@@ -71,7 +98,7 @@ export async function handleHealthRequest(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : '健康检查请求失败',
+      error: error instanceof Error ? error.message : t('health.error.requestFailed'),
     };
   }
 }

@@ -14,6 +14,13 @@ describe('normalizeBookmarkUrl', () => {
     );
   });
 
+  it('统一协议与主机名大小写，保留路径大小写', () => {
+    expect(normalizeBookmarkUrl('HTTPS://EXAMPLE.COM/Path')).toBe(
+      'https://example.com/Path',
+    );
+    expect(normalizeBookmarkUrl('Example.COM')).toBe('https://example.com/');
+  });
+
   it('把带端口但省略协议的网址当作主机名，而不是协议', () => {
     expect(normalizeBookmarkUrl('example.com:8080')).toBe(
       'https://example.com:8080/',
@@ -29,16 +36,28 @@ describe('normalizeBookmarkUrl', () => {
     );
   });
 
-  it('保留合法的 http/https 网址和路径', () => {
+  it('保留合法的 http/https 网址、尾斜杠、查询参数和 fragment', () => {
     expect(normalizeBookmarkUrl('http://example.com/a')).toBe('http://example.com/a');
     expect(normalizeBookmarkUrl('https://example.com/a?q=1#top')).toBe(
       'https://example.com/a?q=1#top',
+    );
+    expect(normalizeBookmarkUrl('https://example.com')).toBe(
+      'https://example.com/',
     );
   });
 
   it('拒绝空值、危险协议和无效格式', () => {
     expect(() => normalizeBookmarkUrl('')).toThrow(BookmarkValidationError);
     expect(() => normalizeBookmarkUrl('javascript:alert(1)')).toThrow('只支持 http 或 https');
+    expect(() => normalizeBookmarkUrl('mailto:dev@example.com')).toThrow(
+      '只支持 http 或 https',
+    );
+    expect(() => normalizeBookmarkUrl('file:///tmp/a.png')).toThrow(
+      '只支持 http 或 https',
+    );
+    expect(() => normalizeBookmarkUrl('data:text/html,hello')).toThrow(
+      '只支持 http 或 https',
+    );
     expect(() => normalizeBookmarkUrl('ftp://example.com')).toThrow('只支持 http 或 https');
     expect(() => normalizeBookmarkUrl('https://')).toThrow('网址格式不正确');
     expect(() => normalizeBookmarkUrl('not a valid url')).toThrow(BookmarkValidationError);

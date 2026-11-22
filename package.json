@@ -1,6 +1,6 @@
 {
   "name": "bookmark-home",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "基于 Chrome 原生书签的双向同步新标签页",

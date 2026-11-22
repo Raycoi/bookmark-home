@@ -2,11 +2,9 @@
 import { computed, ref } from 'vue';
 import BaseDialog from './BaseDialog.vue';
 import FolderPicker from './FolderPicker.vue';
+import { useI18n } from '../i18n';
 import type { MoveDialogState } from '../types/management';
-import {
-  flattenFolderOptions,
-  getNodeTitle,
-} from '../utils/folders';
+import { flattenFolderOptions } from '../utils/folders';
 
 const props = defineProps<{
   state: MoveDialogState;
@@ -19,6 +17,8 @@ const emit = defineEmits<{
   cancel: [];
 }>();
 
+const { t } = useI18n();
+
 const flatFolders = flattenFolderOptions(props.state.tree);
 const initialId = flatFolders.some(
   (folder) => folder.id === props.state.currentParentId,
@@ -27,7 +27,16 @@ const initialId = flatFolders.some(
   : (flatFolders[0]?.id ?? '');
 
 const selectedId = ref(initialId);
-const title = computed(() => getNodeTitle(props.state.target.node));
+const title = computed(() => {
+  const node = props.state.target.node;
+  const trimmed = node.title.trim();
+  if (trimmed) {
+    return trimmed;
+  }
+  return node.type === 'folder'
+    ? t('common.unnamedFolder')
+    : t('common.unnamedBookmark');
+});
 const sameAsCurrent = computed(
   () => selectedId.value === props.state.currentParentId,
 );
@@ -45,8 +54,8 @@ function submit(): void {
 
 <template>
   <BaseDialog
-    :title="`移动“${title}”`"
-    :description="state.target.kind === 'bookmark' ? '选择一个文件夹作为书签的新位置。' : '文件夹及其全部内容会一起移动，不能移动到自身内部。'"
+    :title="t('moveDialog.title', { name: title })"
+    :description="state.target.kind === 'bookmark' ? t('moveDialog.descBookmark') : t('moveDialog.descFolder')"
     :busy="busy"
     @close="emit('cancel')"
   >
@@ -59,7 +68,7 @@ function submit(): void {
       />
 
       <p v-if="sameAsCurrent" class="bh-hint">
-        当前已位于该文件夹，请选择其他目标位置。
+        {{ t('moveDialog.sameAsCurrent') }}
       </p>
 
       <p v-if="error" class="bh-dialog-error" role="alert">{{ error }}</p>
@@ -73,7 +82,7 @@ function submit(): void {
           :disabled="busy"
           @click="emit('cancel')"
         >
-          取消
+          {{ t('common.cancel') }}
         </button>
         <button
           class="bh-button bh-button--primary"
@@ -81,7 +90,7 @@ function submit(): void {
           :disabled="!canMove"
           @click="submit"
         >
-          {{ busy ? '移动中…' : '移动到此处' }}
+          {{ busy ? t('moveDialog.moving') : t('moveDialog.moveHere') }}
         </button>
       </div>
     </template>

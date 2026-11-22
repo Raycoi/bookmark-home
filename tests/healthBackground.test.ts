@@ -34,6 +34,8 @@ function snapshot(): HealthSnapshot {
     records: {},
     pendingUrls: [],
     checkingUrls: [],
+    retryUrls: [],
+    ignoredUrls: [],
     scan: null,
     updatedAt: 1_000,
   };
@@ -44,6 +46,8 @@ function makeScheduler() {
     startScan: vi.fn(async () => ({ started: true, total: 3 })),
     cancelScan: vi.fn(async () => snapshot()),
     recheck: vi.fn(async () => true),
+    ignoreUrl: vi.fn(async () => true),
+    unignoreUrl: vi.fn(async () => true),
     getSnapshot: vi.fn(async () => snapshot()),
   } satisfies HealthMessageScheduler;
 }

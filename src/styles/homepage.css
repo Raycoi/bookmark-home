@@ -60,6 +60,8 @@ a {
 }
 
 .home {
+  position: relative;
+  z-index: 1;
   width: min(100%, calc(var(--bh-page-width) + var(--bh-page-gutter) * 2));
   min-height: 100vh;
   margin: 0 auto;

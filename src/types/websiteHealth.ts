@@ -53,6 +53,8 @@ export interface HealthCheckTask {
   startedAt?: number;
   batchId?: string;
   recoveryCount: number;
+  /** 1 = 快速初检；2 = 超时/网络/5xx 补充复查。 */
+  attempt?: 1 | 2;
 }
 
 export type HealthScanMode = 'all' | 'abnormal';
@@ -76,6 +78,7 @@ export interface HealthStorageState {
   records: Record<string, WebsiteHealthRecord>;
   tasks: HealthCheckTask[];
   scan: HealthScanState | null;
+  ignoredUrls: string[];
   updatedAt: number;
 }
 
@@ -85,6 +88,8 @@ export interface HealthSnapshot {
   records: Record<string, WebsiteHealthRecord>;
   pendingUrls: string[];
   checkingUrls: string[];
+  retryUrls: string[];
+  ignoredUrls: string[];
   scan: HealthScanState | null;
   updatedAt: number;
 }
@@ -115,6 +120,8 @@ export type HealthRequest =
   | { type: 'HEALTH_CHECK_ALL' }
   | { type: 'HEALTH_CHECK_ABNORMAL' }
   | { type: 'HEALTH_RECHECK_URL'; url: string }
+  | { type: 'HEALTH_IGNORE_URL'; url: string }
+  | { type: 'HEALTH_UNIGNORE_URL'; url: string }
   | { type: 'HEALTH_CANCEL_SCAN' };
 
 export interface HealthResponse {

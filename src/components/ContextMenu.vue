@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { useI18n } from '../i18n';
 import type { ContextMenuState } from '../types/management';
 
 const props = defineProps<{
@@ -11,6 +12,7 @@ const emit = defineEmits<{
   close: [];
 }>();
 
+const { t } = useI18n();
 const menuRef = ref<HTMLElement | null>(null);
 const left = ref(props.state.x);
 const top = ref(props.state.y);
@@ -147,7 +149,7 @@ onBeforeUnmount(() => {
       ref="menuRef"
       class="context-menu"
       role="menu"
-      aria-label="书签操作菜单"
+      :aria-label="t('contextMenu.label')"
       :style="{ left: `${left}px`, top: `${top}px` }"
       @contextmenu.prevent
     >

@@ -20,12 +20,14 @@ export interface ConfirmDialogState {
   message: string;
   warning: string | null;
   confirmLabel: string;
+  bulkIds?: string[];
 }
 
 export interface MoveDialogState {
   target: ManagedNode;
   tree: FolderOption[];
   currentParentId: string;
+  bulkIds?: string[];
 }
 
 export interface ContextMenuItem {
@@ -66,6 +68,7 @@ export interface ToastState {
   id: number;
   tone: 'success' | 'error';
   message: string;
+  actionLabel?: string;
 }
 
 export interface BookmarkFormPayload {

@@ -3,12 +3,23 @@ import {
   type NativeBookmarkNode,
 } from '../types/bookmark';
 import { getErrorMessage } from '../utils/errors';
+import { t } from '../i18n';
 import {
   normalizeBookmarkTitle,
   normalizeBookmarkUrl,
   normalizeIndex,
   normalizeNodeId,
 } from '../utils/url';
+
+/** 受保护的系统节点操作，用来选择对应的错误文案。 */
+type ProtectedNodeAction = 'edit' | 'rename' | 'move' | 'delete';
+
+const PROTECTED_NODE_MESSAGE_KEYS: Record<ProtectedNodeAction, string> = {
+  edit: 'bookmark.error.protectedEdit',
+  rename: 'bookmark.error.protectedRename',
+  move: 'bookmark.error.protectedMove',
+  delete: 'bookmark.error.protectedDelete',
+};
 
 /** 书签 API 失败时抛出的错误，消息可直接展示给用户。 */
 export class BookmarkApiError extends Error {
@@ -80,7 +91,7 @@ type BookmarksApiProvider = () => BookmarksApi;
 
 function resolveBookmarksApi(): BookmarksApi {
   if (typeof chrome === 'undefined' || !chrome.bookmarks) {
-    throw new BookmarkApiError('当前环境无法访问 Chrome 书签 API，请在新标签页扩展环境中打开');
+    throw new BookmarkApiError(t('bookmark.error.apiUnavailable'));
   }
   return chrome.bookmarks;
 }
@@ -104,11 +115,13 @@ export function createBookmarkService(
     const parentId =
       destination.parentId === undefined
         ? undefined
-        : normalizeNodeId(destination.parentId, '目标文件夹 ID');
+        : normalizeNodeId(destination.parentId, t('bookmark.label.targetFolderId'));
     const index = normalizeIndex(destination.index);
 
     if (parentId === undefined && index === undefined) {
-      throw new BookmarkApiError(`${actionLabel}时必须指定目标文件夹或排序位置`);
+      throw new BookmarkApiError(
+        t('bookmark.error.destinationRequired', { action: actionLabel }),
+      );
     }
 
     const target: chrome.bookmarks.MoveDestination = {};
@@ -131,7 +144,7 @@ export function createBookmarkService(
       try {
         return await api().getTree();
       } catch (error) {
-        throw wrapApiError('读取书签树', error);
+        throw wrapApiError(t('bookmark.action.readTree'), error);
       }
     },
 
@@ -141,13 +154,19 @@ export function createBookmarkService(
         const nodes = await api().getSubTree(nodeId);
         return nodes[0] ?? null;
       } catch (error) {
-        throw wrapApiError('读取书签子树', error);
+        throw wrapApiError(t('bookmark.action.readSubTree'), error);
       }
     },
 
     async createBookmark(input) {
-      const parentId = normalizeNodeId(input.parentId, '父文件夹 ID');
-      const title = normalizeBookmarkTitle(input.title, '书签名称');
+      const parentId = normalizeNodeId(
+        input.parentId,
+        t('bookmark.label.parentFolderId'),
+      );
+      const title = normalizeBookmarkTitle(
+        input.title,
+        t('bookmark.label.bookmarkName'),
+      );
       const url = normalizeBookmarkUrl(input.url);
       const index = normalizeIndex(input.index);
 
@@ -162,13 +181,19 @@ export function createBookmarkService(
         }
         return await api().create(details);
       } catch (error) {
-        throw wrapApiError('新增书签', error);
+        throw wrapApiError(t('bookmark.action.createBookmark'), error);
       }
     },
 
     async createFolder(input) {
-      const parentId = normalizeNodeId(input.parentId, '父文件夹 ID');
-      const title = normalizeBookmarkTitle(input.title, '文件夹名称');
+      const parentId = normalizeNodeId(
+        input.parentId,
+        t('bookmark.label.parentFolderId'),
+      );
+      const title = normalizeBookmarkTitle(
+        input.title,
+        t('bookmark.label.folderName'),
+      );
       const index = normalizeIndex(input.index);
 
       try {
@@ -181,58 +206,67 @@ export function createBookmarkService(
         }
         return await api().create(details);
       } catch (error) {
-        throw wrapApiError('新建文件夹', error);
+        throw wrapApiError(t('bookmark.action.createFolder'), error);
       }
     },
 
     async updateBookmark(id, changes) {
-      const nodeId = assertMutableNodeId(id, '修改');
+      const nodeId = assertMutableNodeId(id, 'edit');
       const nextChanges: chrome.bookmarks.UpdateChanges = {};
 
       if (changes.title !== undefined) {
-        nextChanges.title = normalizeBookmarkTitle(changes.title, '书签名称');
+        nextChanges.title = normalizeBookmarkTitle(
+          changes.title,
+          t('bookmark.label.bookmarkName'),
+        );
       }
       if (changes.url !== undefined) {
         nextChanges.url = normalizeBookmarkUrl(changes.url);
       }
 
       if (nextChanges.title === undefined && nextChanges.url === undefined) {
-        throw new BookmarkApiError('没有需要修改的字段');
+        throw new BookmarkApiError(t('bookmark.error.noChanges'));
       }
 
       try {
         return await api().update(nodeId, nextChanges);
       } catch (error) {
-        throw wrapApiError('修改书签', error);
+        throw wrapApiError(t('bookmark.action.updateBookmark'), error);
       }
     },
 
     async renameFolder(id, title) {
-      const nodeId = assertMutableNodeId(id, '重命名');
-      const normalizedTitle = normalizeBookmarkTitle(title, '文件夹名称');
+      const nodeId = assertMutableNodeId(id, 'rename');
+      const normalizedTitle = normalizeBookmarkTitle(
+        title,
+        t('bookmark.label.folderName'),
+      );
 
       try {
         return await api().update(nodeId, { title: normalizedTitle });
       } catch (error) {
-        throw wrapApiError('重命名文件夹', error);
+        throw wrapApiError(t('bookmark.action.renameFolder'), error);
       }
     },
 
     async moveBookmark(id, destination) {
-      const nodeId = assertMutableNodeId(id, '移动');
-      return performMove(nodeId, destination, '移动书签');
+      const nodeId = assertMutableNodeId(id, 'move');
+      return performMove(nodeId, destination, t('bookmark.action.moveBookmark'));
     },
 
     async moveFolder(id, destination) {
-      const nodeId = assertMutableNodeId(id, '移动');
+      const nodeId = assertMutableNodeId(id, 'move');
       const parentId =
         destination.parentId === undefined
           ? undefined
-          : normalizeNodeId(destination.parentId, '目标文件夹 ID');
+          : normalizeNodeId(
+              destination.parentId,
+              t('bookmark.label.targetFolderId'),
+            );
 
       if (parentId !== undefined) {
         if (parentId === nodeId) {
-          throw new BookmarkApiError('不能将文件夹移动到自身内部');
+          throw new BookmarkApiError(t('bookmark.error.moveIntoSelf'));
         }
 
         let subtree: NativeBookmarkNode | null;
@@ -240,38 +274,38 @@ export function createBookmarkService(
           const nodes = await api().getSubTree(nodeId);
           subtree = nodes[0] ?? null;
         } catch (error) {
-          throw wrapApiError('校验文件夹移动目标', error);
+          throw wrapApiError(t('bookmark.action.validateMove'), error);
         }
 
         if (!subtree) {
-          throw new BookmarkApiError('找不到要移动的文件夹');
+          throw new BookmarkApiError(t('bookmark.error.folderNotFound'));
         }
 
         if (containsNodeId(subtree, parentId)) {
-          throw new BookmarkApiError('不能将文件夹移动到自己的子文件夹中');
+          throw new BookmarkApiError(t('bookmark.error.moveIntoDescendant'));
         }
       }
 
-      return performMove(nodeId, destination, '移动文件夹');
+      return performMove(nodeId, destination, t('bookmark.action.moveFolder'));
     },
 
     async removeBookmark(id) {
-      const nodeId = assertMutableNodeId(id, '删除');
+      const nodeId = assertMutableNodeId(id, 'delete');
 
       try {
         await api().remove(nodeId);
       } catch (error) {
-        throw wrapApiError('删除书签', error);
+        throw wrapApiError(t('bookmark.action.removeBookmark'), error);
       }
     },
 
     async removeFolder(id) {
-      const nodeId = assertMutableNodeId(id, '删除');
+      const nodeId = assertMutableNodeId(id, 'delete');
 
       try {
         await api().removeTree(nodeId);
       } catch (error) {
-        throw wrapApiError('删除文件夹', error);
+        throw wrapApiError(t('bookmark.action.removeFolder'), error);
       }
     },
 
@@ -303,10 +337,13 @@ export function createBookmarkService(
   };
 }
 
-function assertMutableNodeId(id: string, action: string): string {
+function assertMutableNodeId(
+  id: string,
+  action: ProtectedNodeAction,
+): string {
   const nodeId = normalizeNodeId(id);
   if (isProtectedSystemNodeId(nodeId)) {
-    throw new BookmarkApiError(`不能${action} Chrome 系统书签节点`);
+    throw new BookmarkApiError(t(PROTECTED_NODE_MESSAGE_KEYS[action]));
   }
   return nodeId;
 }
@@ -322,7 +359,12 @@ function wrapApiError(action: string, error: unknown): BookmarkApiError {
   if (error instanceof BookmarkApiError) {
     return error;
   }
-  return new BookmarkApiError(`${action}失败：${getErrorMessage(error)}`);
+  return new BookmarkApiError(
+    t('bookmark.error.actionFailed', {
+      action,
+      message: getErrorMessage(error),
+    }),
+  );
 }
 
 /** 生产环境共享实例；页面内只通过它读写原生书签。 */

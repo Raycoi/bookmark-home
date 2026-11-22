@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { useI18n } from '../../i18n';
 import type { HealthCounts } from '../../composables/useWebsiteHealth';
 import type { HealthFilter } from '../../types/websiteHealth';
 
@@ -12,22 +13,24 @@ const emit = defineEmits<{
   select: [filter: HealthFilter];
 }>();
 
+const { t } = useI18n();
+
 const filters = computed<
   Array<{ id: HealthFilter; label: string; count: number }>
 >(() => {
   const items: Array<{ id: HealthFilter; label: string; count: number }> = [
-    { id: 'all', label: '全部', count: props.counts.total },
-    { id: 'healthy', label: '正常', count: props.counts.healthy },
-    { id: 'abnormal', label: '异常', count: props.counts.abnormal },
+    { id: 'all', label: t('health.filter.all'), count: props.counts.total },
+    { id: 'healthy', label: t('health.filter.healthy'), count: props.counts.healthy },
+    { id: 'abnormal', label: t('health.filter.abnormal'), count: props.counts.abnormal },
     {
       id: 'pending',
-      label: '待检测',
+      label: t('health.filter.pending'),
       count: props.counts.pending + props.counts.checking,
     },
-    { id: 'unknown', label: '无法确认', count: props.counts.unknown },
-    { id: 'unsupported', label: '无法检测', count: props.counts.unsupported },
-    { id: 'private', label: '内网', count: props.counts.private },
-    { id: 'unlisted', label: '未展示', count: props.counts.unlisted },
+    { id: 'unknown', label: t('health.filter.unknown'), count: props.counts.unknown },
+    { id: 'unsupported', label: t('health.filter.unsupported'), count: props.counts.unsupported },
+    { id: 'private', label: t('health.filter.private'), count: props.counts.private },
+    { id: 'unlisted', label: t('health.filter.unlisted'), count: props.counts.unlisted },
   ];
 
   return items.filter(
@@ -39,7 +42,7 @@ const filters = computed<
 </script>
 
 <template>
-  <div class="health-filter" role="group" aria-label="按健康状态筛选">
+  <div class="health-filter" role="group" :aria-label="t('health.filter.aria')">
     <button
       v-for="filter in filters"
       :key="filter.id"

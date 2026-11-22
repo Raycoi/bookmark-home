@@ -1,4 +1,4 @@
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import {
   DEFAULT_SEARCH_ENGINE_ID,
   SEARCH_ENGINES,
@@ -11,6 +11,7 @@ import {
 import {
   readSearchEnginePreference,
   saveSearchEnginePreference,
+  SEARCH_ENGINE_STORAGE_KEY,
 } from '../services/settingsService';
 
 /**
@@ -55,7 +56,31 @@ export function useSearch() {
         selectedEngineId.value = storedId;
       }
     })();
+
+    if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
+      chrome.storage.onChanged.addListener(onStorageChanged);
+    }
   });
+
+  onUnmounted(() => {
+    if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
+      chrome.storage.onChanged.removeListener(onStorageChanged);
+    }
+  });
+
+  function onStorageChanged(
+    changes: Record<string, chrome.storage.StorageChange>,
+    areaName: string,
+  ): void {
+    if (areaName !== 'sync' || !(SEARCH_ENGINE_STORAGE_KEY in changes)) {
+      return;
+    }
+    const value = changes[SEARCH_ENGINE_STORAGE_KEY]?.newValue;
+    if (typeof value === 'string' && isSearchEngineId(value)) {
+      selectedEngineId.value = value;
+      userChangedEngine = true;
+    }
+  }
 
   return {
     engines: SEARCH_ENGINES,

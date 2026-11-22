@@ -23,15 +23,40 @@ describe('navigation', () => {
     expect(getNavigableUrl('javascript:alert(1)')).toBeNull();
     expect(getNavigableUrl('data:text/html,hello')).toBeNull();
     expect(getNavigableUrl('ftp://example.com/')).toBeNull();
+    expect(getNavigableUrl('file:///tmp/a.png')).toBeNull();
+    expect(getNavigableUrl('mailto:dev@example.com')).toBeNull();
     expect(getNavigableUrl('not a url')).toBeNull();
     expect(getNavigableUrl('')).toBeNull();
   });
 
-  it('按站点归并 favicon key，忽略路径和查询参数', () => {
+  it('保留 fragment，让链接仍能定位到锚点', () => {
+    expect(getNavigableUrl('https://example.com/page#section')).toBe(
+      'https://example.com/page#section',
+    );
+    expect(getNavigableUrl('https://example.com/page?a=1#section')).toBe(
+      'https://example.com/page?a=1#section',
+    );
+  });
+
+  it('统一主机名大小写，保留路径大小写、端口和尾斜杠', () => {
+    expect(getNavigableUrl('HTTPS://EXAMPLE.COM/Path')).toBe(
+      'https://example.com/Path',
+    );
+    expect(getNavigableUrl('https://example.com:8443/Path')).toBe(
+      'https://example.com:8443/Path',
+    );
+    expect(getNavigableUrl('https://example.com')).toBe('https://example.com/');
+  });
+
+  it('按站点归并 favicon key，忽略路径、查询参数和 fragment', () => {
     expect(getSiteKey('https://www.example.com/path?q=1#top')).toBe(
       'https://www.example.com/',
     );
+    expect(getSiteKey('https://EXAMPLE.com:8443/a?q=1#top')).toBe(
+      'https://example.com:8443/',
+    );
     expect(getSiteKey('javascript:alert(1)')).toBeNull();
+    expect(getSiteKey('mailto:dev@example.com')).toBeNull();
   });
 });
 

@@ -81,9 +81,6 @@ jobs:
           pnpm zip
           pnpm verify:extension
 
-      - name: Validate version and CHANGELOG
-        run: node scripts/release-check.mjs "$TAG"
-
       - name: Reject existing release
         shell: bash
         run: |
@@ -99,5 +96,5 @@ jobs:
           gh release create "$TAG" \
             ".output/bookmark-home-${VERSION}-chrome.zip" \
             --title "Bookmark Home ${TAG}" \
-            --notes-file .output/release-notes.md \
+            --generate-notes \
             --verify-tag

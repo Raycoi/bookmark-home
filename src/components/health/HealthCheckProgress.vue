@@ -1,22 +1,29 @@
 <script setup lang="ts">
+import { useI18n } from '../../i18n';
 import type { HealthScanState } from '../../types/websiteHealth';
 
 defineProps<{
   scan: HealthScanState;
   percent: number;
+  retryCount: number;
   busy: boolean;
 }>();
 
 const emit = defineEmits<{
   cancel: [];
 }>();
+
+const { t } = useI18n();
 </script>
 
 <template>
-  <section class="health-progress" aria-label="健康检查进度">
+  <section class="health-progress" :aria-label="t('health.progress.aria')">
     <div class="health-progress__head">
       <span class="health-progress__label">
-        检测中 <strong>{{ scan.completed }}</strong> / {{ scan.total }}
+        {{ t('health.progress.labelPrefix') }}<strong>{{ scan.completed }}</strong> / {{ scan.total }}
+        <span v-if="retryCount > 0" class="health-progress__retry">
+          {{ t('health.progress.retry', { count: retryCount }) }}
+        </span>
       </span>
       <button
         class="health-progress__cancel"
@@ -24,7 +31,7 @@ const emit = defineEmits<{
         :disabled="busy"
         @click="emit('cancel')"
       >
-        {{ busy ? '取消中…' : '取消未执行任务' }}
+        {{ busy ? t('health.progress.cancelling') : t('health.progress.cancel') }}
       </button>
     </div>
     <div
@@ -33,7 +40,7 @@ const emit = defineEmits<{
       aria-valuemin="0"
       aria-valuemax="100"
       :aria-valuenow="percent"
-      :aria-label="`健康检查进度 ${percent}%`"
+      :aria-label="t('health.progress.percentAria', { percent })"
     >
       <span class="health-progress__bar" :style="{ width: `${percent}%` }"></span>
     </div>
@@ -64,6 +71,12 @@ const emit = defineEmits<{
 .health-progress__label strong {
   color: var(--bh-health-info);
   font-weight: 650;
+}
+
+.health-progress__retry {
+  margin-left: 7px;
+  color: var(--bh-health-warn);
+  font-size: 11px;
 }
 
 .health-progress__cancel {

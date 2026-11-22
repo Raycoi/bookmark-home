@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { useI18n } from '../i18n';
 import type { FolderOption } from '../utils/folders';
 
 const props = defineProps<{
@@ -12,6 +13,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   select: [id: string];
 }>();
+
+const { t } = useI18n();
 
 const expanded = ref(true);
 const radioId = computed(() => `${props.groupName}-${props.option.id}`);
@@ -26,7 +29,7 @@ const isCurrent = computed(() => props.currentId === props.option.id);
         v-if="option.children.length > 0"
         class="folder-node__toggle"
         type="button"
-        :aria-label="expanded ? '收起子文件夹' : '展开子文件夹'"
+        :aria-label="expanded ? t('folderPicker.collapse') : t('folderPicker.expand')"
         :aria-expanded="expanded"
         @click="expanded = !expanded"
       >
@@ -76,7 +79,7 @@ const isCurrent = computed(() => props.currentId === props.option.id);
           />
         </svg>
         <span class="folder-node__name">{{ option.title }}</span>
-        <span v-if="isCurrent" class="folder-node__badge">当前位置</span>
+        <span v-if="isCurrent" class="folder-node__badge">{{ t('folderPicker.current') }}</span>
       </label>
     </div>
 

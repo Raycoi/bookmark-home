@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import BookmarkFolder from './BookmarkFolder.vue';
 import { useFolderInteractions } from '../composables/useFolderInteractions';
+import { useI18n } from '../i18n';
 import type { HomepageFolder } from '../types/bookmark';
 
 const props = defineProps<{
@@ -9,6 +10,7 @@ const props = defineProps<{
 }>();
 
 const moreButton = ref<HTMLButtonElement | null>(null);
+const { t } = useI18n();
 const {
   manager,
   isBusy,
@@ -23,19 +25,33 @@ const {
   onDrop,
 } = useFolderInteractions(() => props.folder, moreButton);
 
-const title = computed(() => props.folder.title.trim() || '未命名文件夹');
+const title = computed(() => props.folder.title.trim() || t('common.unnamedFolder'));
+const isSelectionMode = computed(() => manager?.selectionMode.value ?? false);
+const isSelected = computed(
+  () => manager?.selectedIds.value.has(props.folder.id) ?? false,
+);
+
+function onHeaderClick(event: MouseEvent): void {
+  if (!isSelectionMode.value || !manager) {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  manager.toggleSelection(props.folder.id, event.shiftKey);
+}
 </script>
 
 <template>
   <section
     class="bookmark-group"
-    :class="{ 'is-dragging': isDragging }"
+    :class="{ 'is-dragging': isDragging, 'is-selected': isSelected }"
     :data-folder-id="folder.id"
   >
     <div
       class="bookmark-group__heading"
       :class="{ 'is-drop-target': isDropTarget }"
-      :draggable="Boolean(manager) && !isBusy"
+      :draggable="Boolean(manager) && !isBusy && !isSelectionMode"
+      @click="onHeaderClick"
       @contextmenu="onContextMenu"
       @dragstart="onDragStart"
       @dragend="onDragEnd"
@@ -43,14 +59,19 @@ const title = computed(() => props.folder.title.trim() || '未命名文件夹');
       @dragleave="onDragLeave"
       @drop.stop="onDrop"
     >
+      <span v-if="isSelectionMode" class="selection-check" aria-hidden="true">
+        <svg v-if="isSelected" width="12" height="12" viewBox="0 0 16 16" fill="none">
+          <path d="m3.5 8.2 3 3 6-6.4" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </span>
       <h2 class="section-title">{{ title }}</h2>
       <button
-        v-if="manager"
+        v-if="manager && !isSelectionMode"
         ref="moreButton"
         class="group-more"
         type="button"
-        :aria-label="`管理文件夹${title}`"
-        :title="`管理文件夹${title}`"
+        :aria-label="t('bookmarkFolder.manage', { name: title })"
+        :title="t('bookmarkFolder.manage', { name: title })"
         :disabled="isBusy"
         draggable="false"
         @click.stop="openMenu"
@@ -77,6 +98,28 @@ const title = computed(() => props.folder.title.trim() || '未命名文件夹');
 
 .bookmark-group.is-dragging {
   opacity: 0.38;
+}
+
+.bookmark-group.is-selected .bookmark-group__heading {
+  background: var(--bh-color-accent-soft);
+  box-shadow: inset 0 0 0 1px var(--bh-color-accent-border);
+}
+
+.selection-check {
+  display: grid;
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  place-items: center;
+  border: 1px solid var(--bh-color-border-strong);
+  border-radius: 5px;
+  color: #fff;
+  background: var(--bh-color-surface);
+}
+
+.is-selected .selection-check {
+  border-color: var(--bh-color-accent);
+  background: var(--bh-color-accent);
 }
 
 .bookmark-group__heading {

@@ -1,3 +1,5 @@
+import { t } from '../i18n';
+
 /** 打开 Chrome 书签管理器并定位到指定文件夹/根节点。 */
 export function buildBookmarkManagerUrl(parentId: string): string {
   return `chrome://bookmarks/?id=${encodeURIComponent(parentId)}`;
@@ -23,7 +25,7 @@ export async function openBookmarkManagerAt(
       : null);
 
   if (!api) {
-    throw new Error('当前环境不支持打开书签管理器');
+    throw new Error(t('bookmark.error.managerUnavailable'));
   }
 
   await api.create({ url: buildBookmarkManagerUrl(parentId) });
