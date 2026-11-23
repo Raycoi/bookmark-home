@@ -7,6 +7,8 @@ export interface AppearanceSettings {
   remoteUrl: string;
   localDataUrl: string;
   overlay: number;
+  tabTitle: string;
+  tabIcon: string;
 }
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
@@ -14,10 +16,13 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   remoteUrl: '',
   localDataUrl: '',
   overlay: 32,
+  tabTitle: 'Bookmark Home',
+  tabIcon: '',
 };
 
 const OVERLAY_MIN = 0;
 const OVERLAY_MAX = 70;
+const TAB_TITLE_MAX = 40;
 
 export function normalizeAppearance(value: unknown): AppearanceSettings {
   if (!value || typeof value !== 'object') {
@@ -36,11 +41,21 @@ export function normalizeAppearance(value: unknown): AppearanceSettings {
     typeof item.overlay === 'number' && Number.isFinite(item.overlay)
       ? Math.min(OVERLAY_MAX, Math.max(OVERLAY_MIN, Math.round(item.overlay)))
       : DEFAULT_APPEARANCE.overlay;
+  const tabTitle =
+    typeof item.tabTitle === 'string'
+      ? item.tabTitle.trim().replace(/\s+/g, ' ').slice(0, TAB_TITLE_MAX)
+      : DEFAULT_APPEARANCE.tabTitle;
+  const tabIcon =
+    typeof item.tabIcon === 'string' && item.tabIcon.startsWith('data:image/')
+      ? item.tabIcon
+      : '';
 
   return {
     backgroundKind: kind,
     remoteUrl: isHttpUrl(remoteUrl) ? remoteUrl : '',
     localDataUrl: localDataUrl.startsWith('data:image/') ? localDataUrl : '',
     overlay,
+    tabTitle: tabTitle || DEFAULT_APPEARANCE.tabTitle,
+    tabIcon,
   };
 }

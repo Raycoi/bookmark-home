@@ -115,7 +115,7 @@ onBeforeUnmount(() => {
 
 <template>
   <Teleport to="body">
-    <div class="dialog-backdrop" @mousedown.self="requestClose">
+    <div class="dialog-backdrop">
       <section
         ref="panelRef"
         class="dialog-panel"

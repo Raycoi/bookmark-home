@@ -141,6 +141,20 @@ function updateAppearance(next: AppearanceSettings): void {
   void saveAppearance(next);
 }
 
+function applyTabAppearance(next: AppearanceSettings): void {
+  document.title = next.tabTitle || 'Bookmark Home';
+  let link = document.querySelector<HTMLLinkElement>('link[data-bookmark-home-icon]');
+  if (!link) {
+    link = document.createElement('link');
+    link.rel = 'icon';
+    link.dataset.bookmarkHomeIcon = 'true';
+    document.head.append(link);
+  }
+  link.href = next.tabIcon || chrome.runtime.getURL('icon/32.png');
+}
+
+watch(appearance, applyTabAppearance, { immediate: true, deep: true });
+
 function closeCoach(): void {
   coachOpen.value = false;
   void completeCapsuleIntro();

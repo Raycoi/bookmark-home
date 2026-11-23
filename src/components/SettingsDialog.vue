@@ -21,7 +21,12 @@ const draft = ref<AppearanceSettings>({ ...props.appearance });
 const { language, setLanguage, t } = useI18n();
 const error = ref<string | null>(null);
 const localLoading = ref(false);
+const tabIconLoading = ref(false);
 const version = getVersion();
+
+const tabIconPreview = computed(
+  () => draft.value.tabIcon || chrome.runtime.getURL('icon/32.png'),
+);
 
 const previewUrl = computed(() => {
   if (draft.value.backgroundKind === 'local') {
@@ -88,6 +93,73 @@ function onLanguageChange(event: Event): void {
 
 function onBackgroundKindChange(): void {
   error.value = null;
+}
+
+function onTabIconChange(event: Event): void {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement)) {
+    return;
+  }
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) {
+    return;
+  }
+  if (!file.type.startsWith('image/')) {
+    error.value = t('settings.invalidFile');
+    return;
+  }
+  tabIconLoading.value = true;
+  error.value = null;
+  void compressTabIcon(file)
+    .then((dataUrl) => {
+      draft.value.tabIcon = dataUrl;
+    })
+    .catch((caught: unknown) => {
+      error.value = caught instanceof Error ? caught.message : t('settings.readFailed');
+    })
+    .finally(() => {
+      tabIconLoading.value = false;
+    });
+}
+
+function compressTabIcon(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(t('settings.readFailed')));
+    reader.onload = () => {
+      if (typeof reader.result !== 'string') {
+        reject(new Error(t('settings.readFailed')));
+        return;
+      }
+      const image = new Image();
+      image.onerror = () => reject(new Error(t('settings.parseFailed')));
+      image.onload = () => {
+        const size = 64;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const context = canvas.getContext('2d');
+        if (!context) {
+          reject(new Error(t('settings.processFailed')));
+          return;
+        }
+        const scale = Math.max(size / image.naturalWidth, size / image.naturalHeight);
+        const width = image.naturalWidth * scale;
+        const height = image.naturalHeight * scale;
+        context.clearRect(0, 0, size, size);
+        context.drawImage(image, (size - width) / 2, (size - height) / 2, width, height);
+        const dataUrl = canvas.toDataURL('image/png');
+        if (dataUrl.length > 300_000) {
+          reject(new Error(t('settings.tooLarge')));
+          return;
+        }
+        resolve(dataUrl);
+      };
+      image.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 async function onFileChange(event: Event): Promise<void> {
@@ -236,6 +308,52 @@ function compressImage(file: File): Promise<string> {
       </section>
 
       <section class="settings-section">
+        <h3 class="settings-section__title">{{ t('settings.tab') }}</h3>
+
+        <div class="settings-tab-preview">
+          <img class="settings-tab-preview__icon" :src="tabIconPreview" alt="" />
+          <span class="settings-tab-preview__title">
+            {{ draft.tabTitle || t('settings.tabTitlePlaceholder') }}
+          </span>
+        </div>
+
+        <label class="settings-field">
+          <span class="settings-field__label">{{ t('settings.tabTitle') }}</span>
+          <input
+            v-model="draft.tabTitle"
+            class="bh-input"
+            type="text"
+            maxlength="40"
+            :placeholder="t('settings.tabTitlePlaceholder')"
+            @input="error = null"
+          />
+        </label>
+
+        <label class="settings-field">
+          <span class="settings-field__label">{{ t('settings.tabIcon') }}</span>
+          <input
+            class="settings-file"
+            type="file"
+            accept="image/*"
+            :disabled="tabIconLoading"
+            @change="onTabIconChange"
+          />
+          <span class="settings-field__hint">
+            {{ tabIconLoading ? t('settings.processing') : t('settings.tabIconHint') }}
+          </span>
+        </label>
+
+        <button
+          v-if="draft.tabIcon"
+          class="settings-link-button"
+          type="button"
+          @click="draft.tabIcon = ''"
+        >
+          {{ t('settings.removeTabIcon') }}
+        </button>
+      </section>
+
+      <section class="settings-section">
         <h3 class="settings-section__title">{{ t('settings.language') }}</h3>
         <label class="settings-field">
           <span class="settings-field__label">{{ t('settings.language') }}</span>
@@ -329,6 +447,48 @@ function compressImage(file: File): Promise<string> {
 .settings-field__hint {
   color: var(--bh-color-text-faint);
   font-size: 11px;
+}
+
+.settings-tab-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid var(--bh-color-border);
+  border-radius: 10px;
+  background: rgba(35, 40, 50, 0.025);
+}
+
+.settings-tab-preview__icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border-radius: 4px;
+  object-fit: contain;
+}
+
+.settings-tab-preview__title {
+  overflow: hidden;
+  color: var(--bh-color-text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-link-button {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  color: var(--bh-color-text-faint);
+  background: transparent;
+  font-size: 11.5px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.settings-link-button:hover {
+  color: var(--bh-color-text-soft);
 }
 
 .settings-file {
